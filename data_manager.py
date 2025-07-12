@@ -1,4 +1,8 @@
 from contextlib import closing
+
+import jwt
+
+
 from data_model import DataModel
 
 from sqlmodel import create_engine, select, Session
@@ -10,10 +14,8 @@ data.get_session()
 
 class DataManager:
     def __init__(self, db_path=None):
-        self.data = None
-        ## AI Assistant
+        self.data = data
 
-        ## AI Assistant
         if db_path is not None:
             connect_args = {"check_same_thread": False}
             sqlite_url = f"sqlite:///{db_path}"
@@ -38,9 +40,7 @@ class DataManager:
         def add_user(self, new_user):
             """
             Add a new user to the database.
-
-            Args:
-                new_user (User model): The User object to be added.
+            :param new_user: The new user to add.
             """
             with self.get_db_session() as session:
                 try:
@@ -53,6 +53,36 @@ class DataManager:
                 except Exception as e:
                     print(f"Error adding user: {e}")
                     session.rollback()
+
+        def add_skills(self, new_skills: [str], username: str, session: Session):
+            """ Add new skills to a user in the database.
+            :param new_skills: The new skills to add.
+            :param username: The id of the user.
+            """
+            statement = select(DataModel.User).where(DataModel.User.username == username)
+            try:
+                with closing(session) as session:
+                    session.execute(statement).update(new_skills)
+                    session.commit()
+                    print(f"Added {new_skills} to {username}")
+            except Exception as e:
+                print(f"Error adding skills: {e}")
+                session.rollback()
+
+        def add_trainings(self, new_trainings: [str], username: str, session: Session):
+            """ Add new trainings to a user in the database.
+            :param new_trainings: The new trainings to add.
+            :param username: The id of the user.
+                """
+            statement = select(DataModel.User).where(DataModel.User.username == username)
+            try:
+                with closing(session) as session:
+                    session.execute(statement).update(new_trainings)
+                    session.commit()
+                    print(f"Added {new_trainings} to {username}")
+            except Exception as e:
+                print(f"Error adding trainings: {e}")
+
 
         ## Getter methods for all table contents ##
         # user by id
@@ -112,6 +142,7 @@ class DataManager:
                 return f"Error getting training data for skill: {e}"
 
 
+        @jwt.PyJWT
         def update_user(self, user_id, **kwargs):
             """Update a user's information."""
             with self.get_db_session() as session:

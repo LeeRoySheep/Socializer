@@ -11,6 +11,8 @@ class DataModel:
         id: int = Field(unique=True, primary_key=True)
         username: str = Field(unique=True)
         role: str = Field(default="user")
+        skills: list[int] = Field(default=[])
+        trainings: list[int] = Field(default=[])
         hashed_name: str = Field(default=None,)
         hashed_password: str = Field(default=None)
         hashed_email: str = Field(default=None)
@@ -75,43 +77,6 @@ class DataModel:
 
 
 
-
-
-    def create_test_data(self, session: Session):
-        # Create test user if it doesn't exist
-        test_user = self.get_user_by_username("testuser", session)
-        if not test_user:
-            print(f"Creating test user 'testuser'...")
-            test_user = self.User(
-                id=1,
-                username="testuser",
-                role="admin",
-                hashed_name="encrypted_name",
-                hashed_password="encrypted_password",
-                hashed_email="encrypted_email"
-            )
-            session.add(test_user)
-            session.commit()
-            print(f"Created: {test_user}")
-        else:
-            print(f"Test user already exists: {test_user}")
-
-    # Create test skills
-        python_skill = session.exec(select(self.Skill).where(self.Skill.skill_name == "Python")).first()
-        if not python_skill:
-            print(f"Creating 'Python' skill...")
-            python_skill = self.Skill(id=1, user_id=test_user.id, skill_name="Python", level=5)
-            session.add(python_skill)
-            session.commit()
-            print(f"Created: {python_skill}")
-
-        sql_skill = session.exec(select(self.Skill).where(self.Skill.skill_name == "SQL")).first()
-        if not sql_skill:
-            print(f"Creating 'SQL' skill...")
-            sql_skill = self.Skill(id=2, user_id=test_user.id, skill_name="SQL", level=4)
-            session.add(sql_skill)
-            session.commit()
-            print(f"Created: {sql_skill}")
 
 
 
