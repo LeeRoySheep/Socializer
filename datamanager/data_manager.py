@@ -20,13 +20,19 @@ class DataManager:
             connect_args = {"check_same_thread": False}
             sqlite_url = f"sqlite:///{db_path}"
 
-            self.engine = create_engine(sqlite_url, echo=True)  # Added 'echo' for logging during development
-            self.sessionlocal = sessionmaker(autocommit=False, autoflush=False, bind=self.engine)
+            self.engine = create_engine(
+                sqlite_url, echo=True
+            )  # Added 'echo' for logging during development
+            self.sessionlocal = sessionmaker(
+                autocommit=False, autoflush=False, bind=self.engine
+            )
 
             Base.metadata.create_all(bind=self.engine)  # Use the imported Base
         else:
             self.engine = self.data_model.engine
-            self.sessionlocal = sessionmaker(autocommit=False, autoflush=False, bind=self.engine)
+            self.sessionlocal = sessionmaker(
+                autocommit=False, autoflush=False, bind=self.engine
+            )
 
     def get_db_session(self):
         """Factory method to get a database session."""
@@ -112,7 +118,11 @@ class DataManager:
         """
         session = next(self.get_db_session())
         try:
-            db_user = session.execute(select(User).where(User.id == user_id)).scalars().first()
+            db_user = (
+                session.execute(select(User).where(User.id == user_id))
+                .scalars()
+                .first()
+            )
             if not db_user:
                 print(f"User {user_id} not found.")
                 return None
@@ -139,7 +149,11 @@ class DataManager:
         """
         session = next(self.get_db_session())
         try:
-            db_user = session.execute(select(User).where(User.id == user_id)).scalars().first()
+            db_user = (
+                session.execute(select(User).where(User.id == user_id))
+                .scalars()
+                .first()
+            )
             if not db_user:
                 print(f"User {user_id} not found.")
                 return False
@@ -168,7 +182,6 @@ class DataManager:
             session.add(skill)
             session.commit()
             session.refresh(skill)
-            users = skill.user_id
             return skill
         except Exception as e:
             session.rollback()
@@ -192,13 +205,65 @@ class DataManager:
             print(f"Error getting skills for user: {e}")
             return []
 
-    def set_skill_for_user(self, user_id: int, skill: Skill) -> Optional[Skill]:
-        """Set a skill for a user.  """
+    def set_skill_for_user(
+        self, user_id: int, skill: Skill, level=0
+    ) -> Optional[Skill]:
+        """Set a skill for a user."""
         session = next(self.get_db_session())
         try:
-            session.add(UserSkill(user_id=user_id, skill_id=skill.id))
+            session.add(UserSkill(user_id=user_id, skill_id=skill.id, level=level))
             session.commit()
             session.refresh(skill)
+        except Exception as e:
+            print(f"Error setting skill for user: {e}")
+            session.rollback()
+
+    # In DataManager class:
+
+    def get_or_create_skill(self, skill_name: str) -> Skill:
+        session = next(self.get_db_session())
+        skill = session.query(Skill).filter_by(skill_name=skill_name).first()
+        if not skill:
+            skill = Skill(skill_name=skill_name)
+            try:
+                session.add(skill)
+                session.commit()
+                session.refresh(skill)
+            except Exception as e:
+                print(f"Error creating new skill: {e}")
+                session.rollback()
+        return skill
+
+    def link_user_skill(self, user_id: int, skill_id: int, level: int = 0):
+        session = next(self.get_db_session())
+        existing = (
+            session.query(UserSkill)
+            .filter_by(user_id=user_id, skill_id=skill_id)
+            .first()
+        )
+        if not existing:
+            userskill = UserSkill(user_id=user_id, skill_id=skill_id, level=level)
+            try:
+                session.add(userskill)
+                session.commit()
+            except Exception as e:
+                print(f"Error adding userskill: {e}")
+                session.rollback()
+
+    def set_skill_for_user(self, user_id: int, skill_id: int, level: int):
+        session = next(self.get_db_session())
+        userskill = (
+            session.query(UserSkill)
+            .filter_by(user_id=user_id, skill_id=skill_id)
+            .first()
+        )
+        try:
+            if userskill:
+                userskill.level = level
+            else:
+                userskill = UserSkill(user_id=user_id, skill_id=skill_id, level=level)
+                session.add(userskill)
+            session.commit()
         except Exception as e:
             print(f"Error setting skill for user: {e}")
             session.rollback()
@@ -260,7 +325,9 @@ class DataManager:
             print(f"Error getting training data for skill: {e}")
             return []
 
-    def update_training_status(self, user_id: int, skill_id: int, status: str) -> Optional[Training]:
+    def update_training_status(
+        self, user_id: int, skill_id: int, status: str
+    ) -> Optional[Training]:
         """Update a training status.
 
         Args:
@@ -274,8 +341,7 @@ class DataManager:
         session = next(self.get_db_session())
         try:
             statement = select(Training).where(
-                Training.user_id == user_id,
-                Training.skill_id == skill_id
+                Training.user_id == user_id, Training.skill_id == skill_id
             )
             training = session.execute(statement).scalars().first()
 

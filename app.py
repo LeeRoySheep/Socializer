@@ -1,19 +1,19 @@
+import os
 from datetime import datetime, timedelta, timezone
 from typing import List, Optional
-import os
 
-from dotenv import load_dotenv, find_dotenv
 import jwt
+from dotenv import load_dotenv, find_dotenv
 from fastapi import Depends, FastAPI, HTTPException, status, Form
-from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from jwt.exceptions import InvalidTokenError
 from passlib.context import CryptContext
 from pydantic import BaseModel
 from sqlmodel import Session, select
 
-from datamanager.data_model import DataModel, User, Skill, Training
 from datamanager.data_manager import DataManager
+from datamanager.data_model import DataModel, User, Skill, Training
 
 # Find and load the .env file
 dotenv_path = find_dotenv()
@@ -150,8 +150,6 @@ async def register_user(user_data: UserCreate, db: Session = Depends(get_db)):
         username=user_data.username,
         hashed_password=get_password_hash(user_data.password),
         hashed_email=get_password_hash(user_data.email) if user_data.email else None,
-        skills="[]",
-        trainings="[]",
         role="user"
     )
 
@@ -169,7 +167,7 @@ async def register_user(user_data: UserCreate, db: Session = Depends(get_db)):
         trainings=new_user.get_trainings()
     )
 
-@app.post("/token", response_model=Token)
+@app.post("/login", response_model=Token)
 async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
     user = authenticate_user(db, form_data.username, form_data.password)
     if not user:
