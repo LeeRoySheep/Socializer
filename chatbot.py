@@ -76,7 +76,6 @@ class Chatbot:
         # Ensure skill exists in DB
         for skill in next(data.get_db_session()).query(Skill).all():
 
-
             messages = [
                 {
                     "role": "system",
@@ -84,13 +83,12 @@ class Chatbot:
                         "You are a psychoanalyst. Create a conversation to evaluate the user's skill "
                         f"in {skill.skill_name}. You'll get responses to your chosen topics. Enforce 5 responses for evaluation. "
                         "Do NOT give a final score until asked. Give the impression of a interesting conversation."
+                        "Start the conversation with the following greeting and a summary topics to talk about. "
+                        f"Hi {self.user.username} and welcome to the socializer training."
+                        "First I want to see what topics we can talk about, for example:...."
                     ),
                 },
-                {
-                    "role": "user",
-                    "content": f"Hi {self.user.username} and welcome to the socializer training."
-                    "First I want to see what topics we can talk about.",
-                },
+                {"role": "user", "content": "Hi! "},
             ]
 
             for _ in range(5):
