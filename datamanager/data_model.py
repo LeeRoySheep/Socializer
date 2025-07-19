@@ -1,7 +1,6 @@
 import datetime
-import json
 from os import path
-from typing import List, Optional, Generator
+from typing import Optional, Generator
 
 from sqlmodel import Field, Session, SQLModel, create_engine
 
@@ -23,22 +22,6 @@ class User(Base, table=True):
 
     def __str__(self):
         return f"User {self.username} (ID: {self.id})"
-
-    def get_skills(self) -> List[int]:
-        """Convert the skills JSON string to a list of integers. representing skill_id"""
-        return json.loads(self.skills)
-
-    def set_skills(self, skills_list: List[int]) -> None:
-        """Convert a list of integers to a JSON string for storage."""
-        self.skills = json.dumps(skills_list)
-
-    def get_trainings(self) -> List[int]:
-        """Convert the trainings JSON string to a list of integers."""
-        return json.loads(self.trainings)
-
-    def set_trainings(self, trainings_list: List[int]) -> None:
-        """Convert a list of integers to a JSON string for storage."""
-        self.trainings = json.dumps(trainings_list)
 
 
 class Skill(Base, table=True):

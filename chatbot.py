@@ -150,7 +150,7 @@ class Chatbot:
 
             # Save skill level to DB
             self.datamanager.set_skill_for_user(
-                self.user.id, skill.id, reasoning.final_value
+                self.user.id, skill, reasoning.final_value
             )
         print("I really enjoy our conversation.")
         return True

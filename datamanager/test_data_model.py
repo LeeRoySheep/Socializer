@@ -65,9 +65,7 @@ class TestDataModel(unittest.TestCase):
         """Test creating a user."""
         # Create a test user
         user = User(
-            username="test_user",
-            hashed_password="hashed_password",
-            role="user"
+            username="test_user", hashed_password="hashed_password", role="user"
         )
 
         # Add the user using the data manager
@@ -88,29 +86,41 @@ class TestDataModel(unittest.TestCase):
         user = User(
             username="skill_test_user",
             hashed_password="hashed_password",
-            role="user"
+            hashed_email="hashed_email",
+            role="user",
         )
 
+        # data manager
+        data = self.data_manager
+
         # Add the user
-        added_user = self.data_manager.add_user(user)
+        added_user = data.add_user(user)
 
         # Test getting empty skills list
-        skills = added_user.get_skills()
+        skills = data.get_skills_for_user(added_user.id)
         self.assertEqual(skills, [])
 
         # Test setting skills list
-        test_skills = [1, 2, 3]
-        added_user.set_skills(test_skills)
+        test_skill = data.get_or_create_skill("Python")
+        data.set_skill_for_user(added_user.id, test_skill, 3)
+        test_skill_2 = data.get_or_create_skill("JavaScript")
+        data.set_skill_for_user(added_user.id, test_skill_2, 2)
+        skills = [val.skill_id for val in data.get_skills_for_user(added_user.id)]
+        self.assertEqual(skills, [test_skill.id, test_skill_2.id])
 
         # Update the user
-        self.data_manager.update_user(added_user.id, skills=added_user.skills)
+        data.update_user(
+            added_user.id,
+            **{"hashed_password": "<NEWPASSWORD>", "hashed_email": "<EMAIL>"},
+        )
 
         # Retrieve the user again
-        retrieved_user = self.data_manager.get_user(added_user.id)
+        retrieved_user = data.get_user(added_user.id)
 
         # Verify skills were saved properly
-        retrieved_skills = retrieved_user.get_skills()
-        self.assertEqual(retrieved_skills, test_skills)
+        user_skills = data.get_skills_for_user(retrieved_user.id)
+        retrieved_skills = [skill.skill_id for skill in user_skills]
+        self.assertEqual(retrieved_skills, [test_skill.id, test_skill_2.id])
 
     def test_add_skill(self):
         """Test adding a skill to a user."""
@@ -118,21 +128,17 @@ class TestDataModel(unittest.TestCase):
         user = User(
             username="skill_user",
             hashed_password="hashed_password",
-            skills="[]",
-            trainings="[]",
-            role="user"
+            role="user",
         )
         added_user = self.data_manager.add_user(user)
 
         # Create a skill for the user
-        skill = Skill(
-            user_id=[added_user.id],
-            skill_name="Python",
-            level=3
-        )
+        skill = Skill(skill_name="Python")
 
         # Add the skill
-        added_skill = self.data_manager.add_skill(skill)
+        added_skill = self.data_manager.set_skill_for_user(
+            added_user.id, skill, level=3
+        )
         self.assertIsNotNone(added_skill)
         self.assertEqual(added_skill.skill_name, "Python")
 
@@ -160,16 +166,12 @@ class TestDataModel(unittest.TestCase):
             hashed_password="hashed_password",
             skills="[]",
             trainings="[]",
-            role="user"
+            role="user",
         )
         added_user = self.data_manager.add_user(user)
 
         # Create a skill for the user
-        skill = Skill(
-            user_id=added_user.id,
-            skill_name="JavaScript",
-            level=2
-        )
+        skill = Skill(user_id=added_user.id, skill_name="JavaScript", level=2)
         added_skill = self.data_manager.add_skill(skill)
 
         # Create a training for the skill
@@ -178,7 +180,7 @@ class TestDataModel(unittest.TestCase):
             skill_id=added_skill.id,
             body="Learning JavaScript fundamentals",
             status="pending",
-            started_at=datetime.now().date()
+            started_at=datetime.now().date(),
         )
 
         # Add the training
@@ -203,20 +205,14 @@ class TestDataModel(unittest.TestCase):
         """Test adding a skill to a user."""
         # Create a test user
         user = User(
-            username="skill_test_user",
-            hashed_password="hashed_password",
-            role="user"
+            username="skill_test_user", hashed_password="hashed_password", role="user"
         )
 
         # Add the user
         added_user = self.data_manager.add_user(user)
 
         # Create a skill for the user
-        skill = Skill(
-            user_id=[added_user.id],
-            skill_name="Python",
-            level=3
-        )
+        skill = Skill(user_id=[added_user.id], skill_name="Python", level=3)
 
         # Add the skill to the user
         added_skill = self.data_manager.add_skill(skill)
@@ -236,9 +232,7 @@ class TestDataModel(unittest.TestCase):
         """Test creating a user."""
         # Create a test user
         user = User(
-            username="test_user",
-            hashed_password="hashed_password",
-            role="user"
+            username="test_user", hashed_password="hashed_password", role="user"
         )
 
         # Add the user using the data manager
