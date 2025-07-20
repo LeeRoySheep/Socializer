@@ -28,17 +28,20 @@ class Skill(Base, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     skill_name: str = Field(default=None, unique=True)
 
-
     def __repr__(self):
-        return f"Skill(id={self.id}, name={self.skill_name}, level={self.level})"
+        return f"Skill(id={self.id}, name={self.skill_name})"
 
     def __str__(self):
         return f"Skill {self.skill_name} (Level: {self.level})"
 
 
 class UserSkill(Base, table=True):
-    user_id: Optional[int] = Field(default=None, foreign_key="user.id", primary_key=True)
-    skill_id: Optional[int] = Field(default=None, foreign_key="skill.id", primary_key=True)
+    user_id: Optional[int] = Field(
+        default=None, foreign_key="user.id", primary_key=True
+    )
+    skill_id: Optional[int] = Field(
+        default=None, foreign_key="skill.id", primary_key=True
+    )
     level: int = Field(default=0)
 
 

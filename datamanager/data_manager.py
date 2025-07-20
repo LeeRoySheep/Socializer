@@ -1,7 +1,7 @@
 from typing import List, Optional, Any
 
+from sqlalchemy import select, create_engine
 from sqlalchemy.orm.session import sessionmaker
-from sqlmodel import select, create_engine
 
 # Import models from parent directory
 from datamanager.data_model import User, Skill, Training, DataModel, Base, UserSkill
@@ -36,8 +36,9 @@ class DataManager:
 
     def get_db_session(self):
         """Factory method to get a database session."""
+        session = self.sessionlocal()
         try:
-            session = self.sessionlocal()
+
             yield session
         except Exception as e:
             session.rollback()
@@ -66,7 +67,11 @@ class DataManager:
             session.add(new_user)
             session.commit()
             session.refresh(new_user)
-            return new_user
+            return (
+                session.execute(select(User).where(User.username == new_user.username))
+                .scalars()
+                .first()
+            )
         except Exception as e:
             print(f"Error adding user: {e}")
             session.rollback()
@@ -181,9 +186,7 @@ class DataManager:
         session = next(self.get_db_session())
         if (
             not session.execute(
-                select(Skill).where(
-                    Skill.id == skill.id or Skill.skill_name == skill.skill_name
-                )
+                select(Skill).where(Skill.skill_name == skill.skill_name)
             )
             .scalars()
             .first()
@@ -198,10 +201,10 @@ class DataManager:
                 print(f"Error adding skill: {e}")
                 return None
         else:
-            return "Skill already exists."
+            return skill
 
-    def get_skills_for_user(self, user_id: int) -> List[Skill]:
-        """Get all skills for a user.
+    def get_skill_ids_for_user(self, user_id: int) -> List[int]:
+        """Get all skill ids for a user.
 
         Args:
             user_id: User ID to get skills for
@@ -210,27 +213,61 @@ class DataManager:
             List of Skill objects
         """
         session = next(self.get_db_session())
-        statement = select(UserSkill).where(UserSkill.user_id == user_id)
+        statement = select(UserSkill.skill_id).where(UserSkill.user_id == user_id)
         try:
             skills = session.execute(statement).scalars().all()
-            print(skills)
             return skills
         except Exception as e:
             print(f"Error getting skills for user: {e}")
+            return []
+
+    def get_skills_for_user(self, user_id: int) -> List[Skill] | None:
+        """Get all skills for a user."""
+        skill_ids = self.get_skill_ids_for_user(user_id)
+        if skill_ids:
+            session = next(self.get_db_session())
+            statement = select(Skill).where(Skill.id.in_(skill_ids))
+            try:
+                skills = session.execute(statement).scalars().all()
+                return skills
+            except Exception as e:
+                print(f"Error getting skills for user: {e}")
+                return None
+        else:
             return []
 
     def set_skill_for_user(
         self, user_id: int, skill: Skill, level=0
     ) -> Optional[Skill]:
         """Set a skill for a user."""
+        skill = self.get_or_create_skill(skill.skill_name)
         session = next(self.get_db_session())
+        existing_user_skill = (
+            session.execute(
+                select(UserSkill).where(
+                    UserSkill.user_id == user_id, UserSkill.skill_id == skill.id
+                )
+            )
+            .scalars()
+            .first()
+        )
+        # Checking if user already set to skill and overwriting db entry if found
+        if existing_user_skill:
+            print("Skill already set for user.")
+            try:
+                existing_user_skill.level = level
+                session.commit()
+                return skill
+            except Exception as e:
+                print(f"Error updating skill for user: {e}")
+                session.rollback()
+                return None
+        # connecting user to skill
         try:
-
-            self.get_or_create_skill(skill.skill_name)
-            session.add(UserSkill(user_id=user_id, skill_id=skill.id, level=level))
+            new_skill = self.get_or_create_skill(skill.skill_name)
+            session.add(UserSkill(user_id=user_id, skill_id=new_skill.id, level=level))
             session.commit()
-            session.refresh(skill)
-            return skill
+            return new_skill
         except Exception as e:
             print(f"Error setting skill for user: {e}")
             session.rollback()
@@ -238,23 +275,25 @@ class DataManager:
 
     # In DataManager class:
 
-    def get_or_create_skill(self, skill_name: str) -> Skill:
+    def get_or_create_skill(self, skill_name: str) -> Skill | None:
         session = next(self.get_db_session())
-        skill = session.query(Skill).filter_by(skill_name=skill_name).first()
-        if not skill:
+        skill = session.query(Skill).filter(Skill.skill_name == skill_name).first()
+        if skill:
+            print("Skill already exists.")
+            return skill
+        else:
             new_skill = Skill(skill_name=skill_name)
             try:
                 session.add(new_skill)
                 session.commit()
                 session.refresh(new_skill)
-                return new_skill
+                return (
+                    session.query(Skill).filter(Skill.skill_name == skill_name).first()
+                )
             except Exception as e:
                 print(f"Error creating new skill: {e}")
                 session.rollback()
                 return None
-        else:
-            print("Skill already exists.")
-            return skill
 
     def link_user_skill(self, user_id: int, skill_id: int, level: int = 0):
         session = next(self.get_db_session())
