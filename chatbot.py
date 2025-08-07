@@ -6,7 +6,7 @@ from openai import OpenAI
 from pydantic import BaseModel
 
 from datamanager.data_manager import DataManager
-from datamanager.data_model import User, DataModel, Skill
+from datamanager.data_model import User, DataModel, Skill, Training
 
 load_dotenv()
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
@@ -41,7 +41,7 @@ class Chatbot:
             {
                 "role": "user",
                 "content": (
-                    "List 5 essential social skills needed for chat-based communication. "
+                    "List 3 essential social skills needed for chat-based communication. "
                     'Respond ONLY with a JSON array of strings like this: ["Skill1", "Skill2", ...]'
                 ),
             },
@@ -70,8 +70,83 @@ class Chatbot:
 
         print("✅ Basic skills assigned to user.")
 
-    def interactive_skill_test(self):
+    def interactive_skill_test(self, input_type: int = 0, skill_name: str = ""):
         steps: list[Step] = []
+        temperature = self.user.temperature
+        if skill_name != "":
+            skill = self.datamanager.get_or_create_skill(skill_name)
+            messages = [
+                {
+                    "role": "system",
+                    "content": (
+                        "You are a psychoanalyst. Create a conversation to evaluate the user's skill "
+                        f"in {skill_name}. You'll get responses to your chosen topics. Enforce 5 responses for evaluation. "
+                        "Do NOT give a final score until asked. Give the impression of a interesting conversation."
+                        "Start the conversation with the following greeting and a summary topics to talk about. "
+                        f"Hi {self.user.username} and welcome to the socializer training."
+                        "First I want to see what topics we can talk about, for example:...."
+                    ),
+                },
+                {"role": "user", "content": "Hi! "},
+            ]
+
+            for _ in range(5):
+                response = self.client.chat.completions.create(
+                    model="gpt-4o-mini",
+                    messages=messages,
+                    temperature=self.user.temperature,
+                )
+
+                bot_message = response.choices[0].message.content.strip()
+                print(f"🤖 {bot_message}")
+                user_answer = self.get_user_input(
+                    input_text="Your answer:", input_type=input_type
+                )
+
+                steps.append(Step(question=bot_message, user_answer=user_answer))
+                messages.append({"role": "assistant", "content": bot_message})
+                messages.append({"role": "user", "content": user_answer})
+
+                if user_answer.lower().strip() in {"stop", "enough", "exit"}:
+                    return False
+
+            # Ask for final evaluation
+            messages.append(
+                {
+                    "role": "user",
+                    "content": (
+                        "Based on the previous conversation, rate the skill "
+                        f"in {skill_name} from 1 to 10. Provide a JSON response with this format:\n"
+                        "{\n"
+                        '  "final_value": 0-10\n'
+                        "}"
+                    ),
+                }
+            )
+
+            eval_response = self.client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=messages,
+                temperature=self.user.temperature,
+            )
+
+            content = eval_response.choices[0].message.content
+            try:
+                parsed = json.loads(content)
+                # reasoning = Reasoning(**parsed)
+            except Exception as e:
+                print(f"[!] Failed to parse final result: {e}")
+                print("Raw output:\n", content)
+                return False
+
+            print(f'🤖 {parsed["final_value"]}')
+
+            # Save skill level to DB
+            self.datamanager.set_skill_for_user(
+                self.user.id, skill, parsed["final_value"]
+            )
+            print("I really enjoy our conversation.")
+            return True
 
         # Ensure skill exists in DB
         for skill in next(data.get_db_session()).query(Skill).all():
@@ -95,12 +170,14 @@ class Chatbot:
                 response = self.client.chat.completions.create(
                     model="gpt-4o-mini",
                     messages=messages,
-                    temperature=0.7,
+                    temperature=self.user.temperature,
                 )
 
                 bot_message = response.choices[0].message.content.strip()
                 print(f"🤖 {bot_message}")
-                user_answer = input("🧑 Your answer: ")
+                user_answer = self.get_user_input(
+                    input_text="Your answer:", input_type=input_type
+                )
 
                 steps.append(Step(question=bot_message, user_answer=user_answer))
                 messages.append({"role": "assistant", "content": bot_message})
@@ -114,14 +191,13 @@ class Chatbot:
                 {
                     "role": "user",
                     "content": (
-                        "Based on the previous conversation, please rate my skill "
-                        f"in {skill.skill_name} from 1 to 10. Provide a JSON response with this format:\n"
+                        "Based on the previous conversation, rate the skill "
+                        f"in {skill.skill_name} from 1 to 10."
+                        "Also try to evaluate the temperature for the messages with the given user."
+                        "Provide a JSON response with this format:\n"
                         "{\n"
-                        '  "steps": [\n'
-                        '    {"question": "...", "user_answer": "..."},\n'
-                        "    ...\n"
-                        "  ],\n"
                         '  "final_value": 0-10\n'
+                        '  "user_temperature": 0.0-1.0'
                         "}"
                     ),
                 }
@@ -130,30 +206,153 @@ class Chatbot:
             eval_response = self.client.chat.completions.create(
                 model="gpt-4o-mini",
                 messages=messages,
-                temperature=0.7,
+                temperature=self.user.temperature,
             )
 
             content = eval_response.choices[0].message.content
             try:
                 parsed = json.loads(content)
-                reasoning = Reasoning(**parsed)
+                # reasoning = Reasoning(**parsed)
             except Exception as e:
                 print(f"[!] Failed to parse final result: {e}")
                 print("Raw output:\n", content)
-                return
+                return False
 
-            print(
-                f"\n✅ Final skill level for '{skill.skill_name}': {reasoning.final_value}/10"
-            )
-            for step in reasoning.steps:
-                print(f"- Q: {step.question}\n  A: {step.user_answer}")
+            print(f'🤖{skill.skill_name}: {parsed["final_value"]}')
+            if self.user.temperature != parsed["user_temperature"]:
+                print(f'User_Id: {self.user.id} Temp: {parsed["user_temperature"]}')
+                self.user.temperature = parsed["user_temperature"]
+                self.datamanager.set_user_temperature(
+                    self.user.id, parsed["user_temperature"]
+                )
 
             # Save skill level to DB
             self.datamanager.set_skill_for_user(
-                self.user.id, skill, reasoning.final_value
+                self.user.id, skill, parsed["final_value"]
             )
         print("I really enjoy our conversation.")
         return True
+
+    def create_training(self):
+        """
+        Create a new training for the user based on their current skill levels.
+
+        :return: True if successful, False otherwise
+        """
+        # Get user skills and their levels
+        try:
+            skills = self.datamanager.get_skills_for_user(self.user.id)
+            skill_levels = {}
+            for skill in skills:
+                level = self.datamanager.get_skilllevel_for_user(self.user.id, skill.id)
+                skill_levels[skill.skill_name] = (
+                    level  # Assuming 'skill_name' is the attribute to access skill names
+                )
+        except Exception as e:
+            print(f"Error fetching user skills or levels: {e}")
+            return False
+
+        if not skill_levels:
+            print("User has no skills assigned.")
+            return False
+
+        # Check if all skills are at maximum level (assuming level 10)
+        if all(level == 10 for level in skill_levels.values()):
+            try:
+                # Create a new social skill for the user to train
+                messages = [
+                    {
+                        "role": "system",
+                        "content": (
+                            f"You are still psychoanalyst and live coach. The user has reached maximum levels in all skills: {skill_levels}. Create a training with topics that include a new social skill important for chat-based communication."
+                            f"Make sure it is not already in the user database: {skills} "
+                            "Give a JSON response with this format:\n"
+                            "'skill_name':'some skill name'\n"
+                            "'skill_level':0-10\n"
+                        ),
+                    }
+                ]
+                response = self.client.chat.completions.create(
+                    model="gpt-4o-mini",
+                    messages=messages,
+                    temperature=self.user.temperature,
+                )
+                new_skill_info = json.loads(response.choices[0].message.content)
+                self.interactive_skill_test(new_skill_info["skill_name"])
+            except Exception as e:
+                print(f"Error creating training for new skill: {e}")
+                return False
+
+        # Create a training based on the current skill levels
+        topic_prompts = [
+            f"Create a training focusing on improving the user's {skill.skill_name}, regarding his current level: {skill_levels[skill.skill_name]}. "
+            f"Adapt the training to the user's temperature: {self.user.temperature} "
+            for skill in skills
+        ]
+
+        try:
+            messages = [
+                {
+                    "role": "system",
+                    "content": (
+                        f"You are still psychoanalyst and live coach. Create a training plans for {self.user.username} with topics: {' '.join(topic_prompts)}."
+                        "Provide a JSON response with exactly this format and no further text:\n"
+                        '{"skills":[skill_name0, skill_name1,...],\n'
+                        '"bodies":[Texts for skill_name0 describing training plan for this skill, Text for...]}'
+                    ),
+                }
+            ]
+            response = self.client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=messages,
+                temperature=self.user.temperature,
+            )
+            raw_content = response.choices[0].message.content
+            parsed_response = json.loads(raw_content)
+            """if not isinstance(parsed_response, dict) or "skills" not in parsed_response:
+                print("Unexpected response format from GPT-4o-mini")
+                return False"""
+        except ValueError as e:
+            print(f"Error parsing JSON response: {e}")
+            print("Raw output:\n", raw_content)
+            return False
+        except Exception as e:
+            print(f"Error creating training: {e}")
+            return False
+
+        # Add trainings based on the parsed response
+        try:
+            for ind, skill in enumerate(skills):
+                body = parsed_response["bodies"][ind]
+                try:
+                    self.datamanager.add_training(
+                        Training(user_id=self.user.id, skill_id=skill.id, body=body)
+                    )
+                except Exception as e:
+                    print(f"[!] Failed to add training for {skill}: {e}")
+            print("Training added successfully!")
+        except Exception as e:
+            print(f"Error adding training: {e}")
+            return False
+
+        return True
+
+    def get_user_input(self, input_text: str, input_type: int = 0) -> str | None:
+        """
+        Get user input from chosen input type...
+        :param input_text: Text to display to user
+        :param input_type: 0 for console, 1 for html form, 2 for GUI
+        :return str: User input
+        """
+        if input_type == 0:
+            return input(input_text)
+        elif input_type == 1:
+            return None
+        elif input_type == 2:
+            return None
+        else:
+            print("Invalid input type. Using console input.")
+            return input(input_text)
 
 
 if __name__ == "__main__":
@@ -164,17 +363,18 @@ if __name__ == "__main__":
     user = (
         next(db.get_session()).query(User).filter(User.username == "test_user").first()
     )
+    # Assign basic skills to user if not already existing
+    chatbot = Chatbot(user)
     if user is None:
         user = User(
             username="test_user", hashed_password="hashed_password", role="user"
         )
         data.add_user(user)
-
-    chatbot = Chatbot(user)
-
-    # Assign basic skills to user
-    chatbot.create_basic_skills()
+        chatbot.create_basic_skills()
 
     # Test a specific skill
+    # chatbot.interactive_skill_test()
 
-    chatbot.interactive_skill_test()
+    # Create training for existing skills not yet at 10
+
+    chatbot.create_training()

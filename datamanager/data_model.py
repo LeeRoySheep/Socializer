@@ -12,6 +12,7 @@ class User(Base, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     username: str = Field(unique=True)
     role: str = Field(default="user")
+    temperature: float = Field(default=0.7)
     hashed_name: str = Field(default=None)
     hashed_password: str = Field(default=None)
     hashed_email: str = Field(default=None)
@@ -49,7 +50,7 @@ class Training(SQLModel, table=True):
     user_id: int = Field(default=None, foreign_key="user.id", primary_key=True)
     skill_id: int = Field(default=None, foreign_key="skill.id", primary_key=True)
     body: str = Field(default=None)
-    status: str = Field(default=None)
+    status: str = Field(default="created")
     absolved: bool = Field(default=False)
     started_at: datetime.date = Field(default=None)
 
@@ -76,6 +77,7 @@ class DataModel:
 
 
 if __name__ == "__main__":
+    # Example usage:
     data = DataModel()
     print(f"Initializing database at {DataModel.sqlite_url}...")
     if path.exists(DataModel.sqlite_url):

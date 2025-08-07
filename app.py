@@ -4,15 +4,16 @@ from typing import List, Optional
 
 import jwt
 from dotenv import load_dotenv, find_dotenv
-from fastapi import Depends, FastAPI, HTTPException, status, Form
+from fastapi import Depends, FastAPI, HTTPException, status, Form, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
+from fastapi.templating import Jinja2Templates
 from jwt.exceptions import InvalidTokenError
 from passlib.context import CryptContext
 from pydantic import BaseModel
 from sqlmodel import Session, select
 
-from chatbot import Chatbot
 from datamanager.data_manager import DataManager
 from datamanager.data_model import DataModel, User, Skill, Training
 
@@ -28,6 +29,9 @@ if not SECRET_KEY:
     )
 ALGORITHM = os.getenv("ALGORITHM", "HS256")
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", 30))
+
+# Specify the templates directory
+templates = Jinja2Templates(directory="templates")
 
 
 # Models for API requests and responses
@@ -105,6 +109,11 @@ def get_password_hash(password):
 
 
 def get_user(db: Session, username: str):
+    """Retrieve user by username from database"""
+    # return db.query(User).filter(User.username == username).first()  # SQLAlchemy query
+    # return db.get(User, username)  # SQLModel query
+    # return data_model.get_user_by_username(username)  # SQLModel query
+
     return data_manager.get_user_by_username(username)
 
 
@@ -155,51 +164,45 @@ async def get_current_active_user(current_user: User = Depends(get_current_user)
     return current_user
 
 
-@app.get("/register")
-async def register():
+async def get_user_skills(
+    current_user: User = Depends(get_current_user), db: Session = Depends(get_db)
+) -> list[int] | None:
+
+    return DataManager.get_skills_for_user(current_user.id)
+
+
+@app.get("/register", response_class=HTMLResponse)
+async def register(request: Request):
     """form for user registration"""
-    pass
+    return templates.TemplateResponse("register.html", {"request": request})
 
 
 # Routes
-@app.post("/register", response_model=UserResponse)
-async def register_user(user_data: UserCreate, db: Session = Depends(get_db)):
-    # Check if username already exists
-    existing_user = get_user(db, user_data.username)
+@app.post("/register")
+async def register_user(
+    username: str = Form(...),
+    email: str = Form(...),
+    password: str = Form(...),
+    db: Session = Depends(get_db),
+):
+    existing_user = db.query(User).filter(User.username == username).first()
     if existing_user:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Username already registered",
-        )
-
-    # Create new user
-    new_user = User(
-        username=user_data.username,
-        hashed_password=get_password_hash(user_data.password),
-        hashed_email=get_password_hash(user_data.email) if user_data.email else None,
-        role="user",
+        raise HTTPException(status_code=400, detail="Username already registered")
+    user = User(
+        username=username,
+        hashed_email=get_password_hash(email),
+        hashed_password=get_password_hash(password),
     )
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    return {"message": "User successfully registered"}
 
-    # Add to database
-    try:
-        db.add(new_user)
-        db.commit()
-        db.refresh(new_user)
-    except Exception as e:
-        db.rollback()
-        raise HTTPException()
-    chatbot = Chatbot(new_user)
-    chatbot.create_basic_skills()
-    chatbot.interactive_skill_test()
 
-    # Return user data (convert JSON strings back to lists)
-    return UserResponse(
-        id=new_user.id,
-        username=new_user.username,
-        role=new_user.role,
-        skills=data_manager.get_skills_for_user(new_user.id),
-        trainings=data_manager.get_training_for_user(new_user.id),
-    )
+@app.get("/login", response_class=HTMLResponse)
+async def login(request: Request):
+    """form for user registration"""
+    return templates.TemplateResponse("login.html", {"request": request})
 
 
 @app.post("/login", response_model=Token)
@@ -293,7 +296,7 @@ async def start_training(
     db.commit()
 
     # Update user's trainings list
-    trainings = current_user.get_trainings()
+    trainings = data_manager.get_training_for_user(current_user.id)
     trainings.append(new_training.skill_id)  # Using skill_id as identifier
     current_user.set_trainings(trainings)
 

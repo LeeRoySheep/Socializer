@@ -172,6 +172,28 @@ class DataManager:
             print(f"Error deleting user: {e}")
             return False
 
+    def set_user_temperature(self, user_id: int, temperature: float) -> None:
+        """Set a user's temperature.
+        Args:
+            user_id: The user ID to set
+            temperature: The new temperature
+        Returns:
+            None
+        """
+        session = next(self.get_db_session())
+        try:
+            # Use the ORM to update the user's temperature
+            user = session.query(User).filter(User.id == user_id).first()
+            if user:
+                user.temperature = temperature
+                session.commit()
+                print("User temperature set successfully!")
+            else:
+                print(f"User with ID {user_id} not found.")
+        except Exception as e:
+            session.rollback()
+            print(f"Error setting user's temperature: {e}")
+
     # Skills Management Methods
 
     def add_skill(self, skill: Skill) -> Optional[Skill]:
@@ -236,6 +258,23 @@ class DataManager:
         else:
             return []
 
+    def get_skilllevel_for_user(self, user_id: int, skill_id: int) -> int | None:
+        """Get skilllevel for a user."""
+        session = next(self.get_db_session())
+        skill_level = (
+            session.execute(
+                select(UserSkill.level).where(
+                    UserSkill.user_id == user_id, UserSkill.skill_id == skill_id
+                )
+            )
+            .scalars()
+            .first()
+        )
+        if skill_level:
+            return skill_level
+        else:
+            return None
+
     def set_skill_for_user(
         self, user_id: int, skill: Skill, level=0
     ) -> Optional[Skill]:
@@ -253,7 +292,6 @@ class DataManager:
         )
         # Checking if user already set to skill and overwriting db entry if found
         if existing_user_skill:
-            print("Skill already set for user.")
             try:
                 existing_user_skill.level = level
                 session.commit()
