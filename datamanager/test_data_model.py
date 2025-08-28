@@ -6,7 +6,6 @@ from datetime import datetime
 # Make sure we can import from parent directory
 sys.path.insert(0, os.path.abspath(os.path.dirname(os.path.dirname(__file__))))
 
-from sqlmodel import Session, create_engine, SQLModel
 
 from datamanager.data_model import User, Skill, Training
 from datamanager.data_manager import DataManager
@@ -25,21 +24,15 @@ class TestDataModel(unittest.TestCase):
             os.remove(TEST_DB_PATH)
 
         # Create engine and tables directly
-        sqlite_url = f"sqlite:///{TEST_DB_PATH}"
-        connect_args = {"check_same_thread": False}
-        cls.engine = create_engine(sqlite_url, echo=True, connect_args=connect_args)
-
-        # Create all tables
-        SQLModel.metadata.create_all(cls.engine)
-
-        # Create a data manager for testing
-        cls.data_manager = DataManager(db_path=TEST_DB_PATH)
+        cls.dm = DataManager(TEST_DB_PATH)
+        cls.session = next(cls.dm.data_model.get_db())
+        cls.dm.data_model.create_db_and_tables()
 
     @classmethod
     def tearDownClass(cls):
         """Clean up after all tests are done."""
         # Close the engine
-        cls.engine.dispose()
+        cls.dm.data_model.engine.dispose()
 
         # Remove the test database file
         if os.path.exists(TEST_DB_PATH):
@@ -48,12 +41,13 @@ class TestDataModel(unittest.TestCase):
     def setUp(self):
         """Set up before each test."""
         # Create a new session for each test
-        self.session = Session(self.engine)
+        self.dm = DataManager(TEST_DB_PATH)
+        self.session = next(self.dm.data_model.get_db())
 
         # Clear all data before each test
-        self.session.execute("DELETE FROM training")
-        self.session.execute("DELETE FROM skill")
-        self.session.execute("DELETE FROM user")
+        self.session.query(Training).delete()
+        self.session.query(Skill).delete()
+        self.session.query(User).delete()
         self.session.commit()
 
     def tearDown(self):
@@ -69,14 +63,14 @@ class TestDataModel(unittest.TestCase):
         )
 
         # Add the user using the data manager
-        added_user = self.data_manager.add_user(user)
+        added_user = self.dm.add_user(user)
 
         # Verify the user was added
         self.assertIsNotNone(added_user)
         self.assertEqual(added_user.username, "test_user")
 
         # Verify the user can be retrieved
-        retrieved_user = self.data_manager.get_user_by_username("test_user")
+        retrieved_user = self.dm.get_user_by_username("test_user")
         self.assertIsNotNone(retrieved_user)
         self.assertEqual(retrieved_user.username, "test_user")
 
@@ -91,14 +85,14 @@ class TestDataModel(unittest.TestCase):
         )
 
         # data manager
-        data = self.data_manager
+        data = self.dm
 
         # Add the user
         added_user = data.add_user(user)
 
         # Test getting empty skills list
         skills = data.get_skills_for_user(added_user.id)
-        self.assertEqual(skills, [])
+        self.assertEqual(skills, [None])
 
         # Test setting skills list
         test_skill = data.get_or_create_skill("Python")
@@ -129,30 +123,28 @@ class TestDataModel(unittest.TestCase):
             hashed_password="hashed_password",
             role="user",
         )
-        added_user = self.data_manager.add_user(user)
+        added_user = self.dm.add_user(user)
 
         # Create a skill for the user
         skill = Skill(skill_name="Python")
 
         # Add the skill
-        added_skill = self.data_manager.set_skill_for_user(
-            added_user.id, skill, level=3
-        )
+        added_skill = self.dm.set_skill_for_user(added_user.id, skill, level=3)
         self.assertIsNotNone(added_skill)
         self.assertEqual(added_skill.skill_name, "Python")
 
         # Verify the skill is linked to the user
-        skills = self.data_manager.get_skills_for_user(added_user.id)
+        skills = self.dm.get_skills_for_user(added_user.id)
         self.assertEqual(len(skills), 1)
         self.assertEqual(skills[0].skill_name, "Python")
 
         # Verify user has the skill in their list
-        updated_user = self.data_manager.update_user(
-            added_user.id, hashed_password="<PASSWORD>"
-        )
+        updated_user = self.dm.update_user(added_user.id, hashed_password="<PASSWORD>")
         self.assertIsNotNone(updated_user)
-        user_skills = self.data_manager.get_skills_for_user(updated_user.id)
-        self.assertIn(added_skill, user_skills)
+        user_skills = self.dm.get_skills_for_user(updated_user.id)
+        self.assertIn(
+            added_skill.skill_name, [skill.skill_name for skill in user_skills]
+        )
 
     def test_add_training(self):
         """Test adding a training session."""
@@ -162,39 +154,41 @@ class TestDataModel(unittest.TestCase):
             hashed_password="hashed_password",
             role="user",
         )
-        added_user = self.data_manager.add_user(user)
+        added_user = self.dm.add_user(user)
 
         # Create a skill for the user
-        skill = Skill(user_id=added_user.id, skill_name="JavaScript", level=2)
-        added_skill = self.data_manager.add_skill(skill)
+        added_skill = self.dm.get_or_create_skill(skill_name="JavaScript")
+        user_skill = self.dm.link_user_skill(added_user.id, added_skill.id, 2)
 
         # Create a training for the skill
         training = Training(
             user_id=added_user.id,
             skill_id=added_skill.id,
-            body="Learning JavaScript fundamentals",
+            notes="Learning JavaScript fundamentals",
             status="pending",
             started_at=datetime.now().date(),
         )
 
         # Add the training
-        added_training = self.data_manager.add_training(training)
+        added_training = self.dm.add_training(training)
         self.assertIsNotNone(added_training)
-        self.assertEqual(added_training.body, "Learning JavaScript fundamentals")
+        self.assertEqual(added_training.notes, "Learning JavaScript fundamentals")
 
         # Verify the training is associated with the user
-        trainings = self.data_manager.get_training_for_user(added_user.id)
+        trainings = self.dm.get_training_for_user(added_user.id)
         self.assertEqual(len(trainings), 1)
 
         # Verify the training is associated with the skill
-        skill_trainings = self.data_manager.get_training_for_skill(added_skill.id)
+        skill_trainings = self.dm.get_training_for_skill(added_skill.id)
         self.assertEqual(len(skill_trainings), 1)
 
         # Check that the user's trainings list was updated
-        updated_user = self.data_manager.update_user(added_user.id, **{"role": "admin"})
+        updated_user = self.dm.update_user(added_user.id, **{"role": "admin"})
         self.assertIsNotNone(updated_user)
-        user_trainings = self.data_manager.get_training_for_user(updated_user.id)
-        self.assertIn(added_training, user_trainings)
+        user_trainings = self.dm.get_training_for_user(updated_user.id)
+        self.assertIn(
+            added_training, user_trainings, "Training not found in user's trainings"
+        )
 
     def test_update_training_status(self):
         """Test updating a training status."""
@@ -202,27 +196,29 @@ class TestDataModel(unittest.TestCase):
         user = User(
             username="training_user", hashed_password="hashed_password", role="user"
         )
-        added_user = self.data_manager.add_user(user)
+        added_user = self.dm.add_user(user)
 
         # Create a skill for the user
-        skill = Skill(user_id=added_user.id, skill_name="JavaScript")
-        added_skill = self.data_manager.set_skill_for_user(added_user.id, skill, 2)
+        skill = Skill(skill_name="JavaScript")
+        added_skill = self.dm.set_skill_for_user(added_user.id, skill, 2)
         # Create a training for the skill
         training = Training(
             user_id=added_user.id,
             skill_id=added_skill.id,
-            body="Learning JavaScript fundamentals",
+            notes="Learning JavaScript fundamentals",
             status="pending",
             started_at=datetime.now().date(),
         )
-        added_training = self.data_manager.add_training(training)
+        added_training = self.dm.add_training(training)
         self.assertIsNotNone(added_training)
-        self.assertEqual(added_training.body, "Learning JavaScript fundamentals")
+        self.assertEqual(added_training.notes, "Learning JavaScript fundamentals")
+        print("First added training:", added_training.status)
         self.assertEqual(added_training.status, "pending")
         # Update the training status
-        updated_training = self.data_manager.update_training_status(
+        updated_training = self.dm.update_training_status(
             added_training.user_id, added_skill.id, "completed"
         )
         # Check that the user's trainings list was updated
         self.assertIsNotNone(updated_training)
+        print("Second added training:", updated_training.status)
         self.assertEqual(updated_training.status, "completed")

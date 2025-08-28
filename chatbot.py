@@ -27,9 +27,57 @@ class Chatbot:
         self.user = user
         self.client = client
         self.datamanager = DataManager()
+        self.standard_prompt = (
+            "You are a psychoanalyst. When asked to list items, respond only with a valid JSON"
+            " list of plain strings. \nDo not include explanations, formatting, or code blocks"
+            " — only output the raw JSON array."
+        )
 
     def create_basic_skills(self):
         """Creates and assigns basic skills to the user."""
+        if len(self.datamanager.get_skills_for_user(self.user.id)) > 0:
+            messages = [
+                {
+                    "role": "system",
+                    "content": self.standard_prompt,
+                },
+                {
+                    "role": "user",
+                    "content": (
+                        f"List 3 essential social skills not included in the following old skills list:"
+                        f"{self.datamanager.get_skills_for_user(self.user.id)}"
+                        "Choose them regarding following user preferences:"
+                        f'{self.user.preferences or "Basic chatting skills"}. '
+                        "Respond ONLY with a JSON array of strings like this: "
+                        '["OldSkill1", "OldSkill2", ..., "NewSkill1",...]'
+                    ),
+                },
+            ]
+
+            response = self.client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=messages,
+                temperature=self.user.temperature,
+            )
+
+            try:
+                response_text = response.choices[0].message.content.strip()
+                skills_list = json.loads(response_text)
+            except json.JSONDecodeError:
+                print("[!] Failed to parse skill list")
+                return False
+
+            if not isinstance(skills_list, list):
+                print("[!] Parsed skills are not a list")
+                return False
+
+            for skill_name in skills_list:
+                skill = self.datamanager.get_or_create_skill(skill_name)
+                self.datamanager.link_user_skill(self.user.id, skill.id)
+
+            print("✅ Basic skills advanced.")
+            return True
+
         messages = [
             {
                 "role": "system",
@@ -259,34 +307,22 @@ class Chatbot:
         # Check if all skills are at maximum level (assuming level 10)
         if all(level == 10 for level in skill_levels.values()):
             try:
-                # Create a new social skill for the user to train
-                messages = [
-                    {
-                        "role": "system",
-                        "content": (
-                            f"You are still psychoanalyst and live coach. The user has reached maximum levels in all skills: {skill_levels}. Create a training with topics that include a new social skill important for chat-based communication."
-                            f"Make sure it is not already in the user database: {skills} "
-                            "Give a JSON response with this format:\n"
-                            "'skill_name':'some skill name'\n"
-                            "'skill_level':0-10\n"
-                        ),
-                    }
-                ]
-                response = self.client.chat.completions.create(
-                    model="gpt-4o-mini",
-                    messages=messages,
-                    temperature=self.user.temperature,
-                )
-                new_skill_info = json.loads(response.choices[0].message.content)
-                self.interactive_skill_test(new_skill_info["skill_name"])
+                # Create new training
+                self.create_basic_skills()
+                self.interactive_skill_test()
             except Exception as e:
-                print(f"Error creating training for new skill: {e}")
+                print(f"Error creating new skills: {e}")
                 return False
 
         # Create a training based on the current skill levels
         topic_prompts = [
-            f"Create a training focusing on improving the user's {skill.skill_name}, regarding his current level: {skill_levels[skill.skill_name]}. "
-            f"Adapt the training to the user's temperature: {self.user.temperature} "
+            (
+                f"Create a training focusing on improving the user's {skill.skill_name}, "
+                f"regarding his current level: {skill_levels[skill.skill_name]}. "
+                f"Adapt the training to the user's"
+                f" preferences:"
+                f" {self.user.preferences} "
+            )
             for skill in skills
         ]
 
@@ -295,10 +331,13 @@ class Chatbot:
                 {
                     "role": "system",
                     "content": (
-                        f"You are still psychoanalyst and live coach. Create a training plans for {self.user.username} with topics: {' '.join(topic_prompts)}."
+                        f"You are still psychoanalyst and live coach. Create a training plans for {self.user.username} "
+                        f"with topics: {' '.join(topic_prompts)}."
                         "Provide a JSON response with exactly this format and no further text:\n"
                         '{"skills":[skill_name0, skill_name1,...],\n'
-                        '"bodies":[Texts for skill_name0 describing training plan for this skill, Text for...]}'
+                        '"bodies":[(Text for skill_name0 describing training plan for this skill),'
+                        " (Text for skill_name1 describing training plan for this skill),"
+                        "...]}"
                     ),
                 }
             ]
@@ -360,17 +399,17 @@ if __name__ == "__main__":
     db.create_db_and_tables()
 
     data = DataManager()
-    user = (
-        next(db.get_session()).query(User).filter(User.username == "test_user").first()
-    )
+
+    user = data.get_user_by_username("test_user")
     # Assign basic skills to user if not already existing
-    chatbot = Chatbot(user)
+
     if user is None:
         user = User(
             username="test_user", hashed_password="hashed_password", role="user"
         )
         data.add_user(user)
-        chatbot.create_basic_skills()
+    chatbot = Chatbot(user)
+    chatbot.create_basic_skills()
 
     # Test a specific skill
     # chatbot.interactive_skill_test()

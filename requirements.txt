@@ -9,5 +9,14 @@ python-multipart==0.0.6
 pyjwt==2.8.0
 bcrypt==4.0.1
 
+# AI and ML dependencies
 openai~=1.97.0
 Jinja2~=3.1.6
+langchain>=0.1.0
+langchain-tavily>=0.1.0
+langgraph>=0.1.0
+
+# Concurrency and utilities
+anyio>=3.0.0
+pytest-asyncio>=0.23.0
+nest-asyncio>=1.6.0
