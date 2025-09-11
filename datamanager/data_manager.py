@@ -1,5 +1,5 @@
-import json
 import datetime
+import json
 from typing import List, Optional, Any
 
 # Import models from parent directory
@@ -322,14 +322,25 @@ class DataManager:
                         print(f"Error parsing existing messages: {e}")
                         existing_messages = []
 
+                # Ensure we're working with lists
+                if not isinstance(existing_messages, list):
+                    if isinstance(existing_messages, str):
+                        try:
+                            existing_messages = json.loads(existing_messages)
+                        except json.JSONDecodeError:
+                            existing_messages = []
+                    else:
+                        existing_messages = []
+                
                 # Only keep the last message from existing messages to maintain context
-                if existing_messages:
-                    last_existing = existing_messages[-1:]
-                else:
-                    last_existing = []
+                last_existing = existing_messages[-1:] if existing_messages else []
+                
+                # Ensure serializable_messages is a list
+                if not isinstance(serializable_messages, list):
+                    serializable_messages = []
                 
                 # Combine last existing message with new messages and keep last 10
-                updated_messages = (last_existing + serializable_messages)[-10:]
+                updated_messages = last_existing + serializable_messages[-10:]
                 
                 # Store as JSON string
                 user.messages = json.dumps(updated_messages, ensure_ascii=False)
@@ -398,7 +409,7 @@ class DataManager:
             print(f"Error getting skills for user: {e}")
             return []
 
-    def get_skills_for_user(self, user_id: int) -> List[Skill] | None:
+    def get_skills_for_user(self, user_id: int) -> Optional[List[Skill]]:
         """Get all skills for a user."""
         skill_ids = self.get_skill_ids_for_user(user_id)
         if skill_ids:
@@ -416,7 +427,7 @@ class DataManager:
             print("No skills found.")
             return None
 
-    def get_skilllevel_for_user(self, user_id: int, skill_id: int) -> int | None:
+    def get_skilllevel_for_user(self, user_id: int, skill_id: int) -> Optional[int]:
         """Get skilllevel for a user."""
         session = next(self.data_model.get_db())
         skill_level = (
@@ -424,10 +435,10 @@ class DataManager:
             .filter(UserSkill.user_id == user_id, UserSkill.skill_id == skill_id)
             .first()
         )
-        if skill_level:
-            return skill_level
+        if skill_level and skill_level[0] is not None:
+            return skill_level[0]  # Return just the level value
         else:
-            return None
+            return 0  # Default to 0 if no skill level found
 
     def set_skill_for_user(
         self, user_id: int, skill: Skill, level=0
@@ -463,7 +474,7 @@ class DataManager:
 
     # In DataManager class:
 
-    def get_or_create_skill(self, skill_name: str) -> Skill | None:
+    def get_or_create_skill(self, skill_name: str) -> Optional[Skill]:
         session = next(self.data_model.get_db())
         skill = session.query(Skill).filter(Skill.skill_name == skill_name).first()
         if skill:

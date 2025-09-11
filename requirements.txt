@@ -1,22 +1,41 @@
-fastapi>=0.104.0
-pydantic<2.0
-sqlalchemy==1.4.41
-sqlmodel==0.0.8
-uvicorn==0.22.0
-python-dotenv==1.0.0
-passlib==1.7.4
-python-multipart==0.0.6
-pyjwt==2.8.0
-bcrypt==4.0.1
+# Core dependencies
+fastapi
+sqlalchemy
+sqlmodel
+uvicorn[standard]
+python-dotenv
+passlib
+bcrypt>=4.0.0
 
-# AI and ML dependencies
-openai~=1.97.0
-Jinja2~=3.1.6
-langchain>=0.1.0
-langchain-tavily>=0.1.0
-langgraph>=0.1.0
+# Web and HTTP
+httpx
+websockets
+jinja2
+python-multipart
 
-# Concurrency and utilities
-anyio>=3.0.0
-pytest-asyncio>=0.23.0
-nest-asyncio>=1.6.0
+# Authentication and Security
+python-jose[cryptography]
+pyjwt
+
+# Database
+sqlalchemy-utils
+alembic
+
+# Testing
+pytest
+pytest-asyncio
+pytest-cov
+pytest-httpx
+
+# AI/ML
+openai
+langchain
+langchain-tavily
+langgraph
+
+# Utilities
+anyio
+nest-asyncio
+requests
+python-dateutil
+typing-extensions

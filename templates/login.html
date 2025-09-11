@@ -2,15 +2,66 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Login</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login - Socializer</title>
+    <link rel="stylesheet" href="{{ url_for('static', path='/css/style.css') }}">
 </head>
 <body>
-<h2>Login</h2>
-<form action="/login" method="post">
-    Username: <input type="text" name="username"><br>
-    Password: <input type="password" name="password"><br><br>
-    <input type="submit" value="Login">
-</form>
-<a href="/register">Register</a>
+<div class="auth-container">
+    <h1>Welcome Back! 👋</h1>
+
+    <form id="login-form" class="auth-form" method="POST" action="/api/auth/login">
+        <div class="form-group">
+            <label for="login-username">Username</label>
+            <input type="text" id="login-username" name="username" class="form-control" required>
+        </div>
+
+        <div class="form-group">
+            <label for="login-password">Password</label>
+            <input type="password" id="login-password" name="password" class="form-control" required>
+        </div>
+
+        <div id="login-error" class="alert alert-danger" style="display: none;"></div>
+
+        <div class="form-actions mt-3">
+            <button type="submit" id="login-button" class="btn btn-primary w-100">
+                <span class="login-text">Login</span>
+                <span class="spinner-border spinner-border-sm d-none" role="status" aria-hidden="true"></span>
+            </button>
+        </div>
+
+        <div class="form-footer mt-3 text-center">
+            Don't have an account? <a href="/register">Register here</a>
+        </div>
+    </form>
+</div>
+
+<script src="{{ url_for('static', path='/js/auth.js') }}"></script>
+<script>
+    // Check for URL parameters
+    const urlParams = new URLSearchParams(window.location.search);
+    const errorParam = urlParams.get('error');
+    const registeredParam = urlParams.get('registered');
+
+    // Show error message if present
+    if (errorParam) {
+        const errorElement = document.getElementById('login-error');
+        if (errorElement) {
+            errorElement.textContent = decodeURIComponent(errorParam);
+            errorElement.style.color = '#dc3545';
+            errorElement.style.display = 'block';
+        }
+    }
+
+    // Show success message after registration
+    if (registeredParam === '1') {
+        const errorElement = document.getElementById('login-error');
+        if (errorElement) {
+            errorElement.textContent = 'Registration successful! Please log in with your new credentials.';
+            errorElement.style.color = '#28a745';
+            errorElement.style.display = 'block';
+        }
+    }
+</script>
 </body>
 </html>

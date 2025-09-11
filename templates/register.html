@@ -2,16 +2,51 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Register</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Register - Socializer</title>
+    <link rel="stylesheet" href="{{ url_for('static', path='/css/style.css') }}">
 </head>
 <body>
-<h2>Register</h2>
-<form action="/register" method="post">
-    Username: <input type="text" name="username"><br>
-    Email: <input type="email" name="email"><br>
-    Password: <input type="password" name="password"><br><br>
-    <input type="submit" value="Register">
-</form>
-<a href="/login">Login</a>
+    <div class="auth-container">
+        <h1>Create an Account</h1>
+        
+        <form id="register-form" class="auth-form" action="/api/auth/register" method="POST">
+            <div class="form-group">
+                <label for="register-username">Username</label>
+                <input type="text" id="register-username" name="username" required>
+            </div>
+            
+            <div class="form-group">
+                <label for="register-email">Email</label>
+                <input type="email" id="register-email" name="email" required>
+            </div>
+            
+            <div class="form-group">
+                <label for="register-password">Password</label>
+                <input type="password" id="register-password" name="password" required
+                       minlength="6" placeholder="At least 6 characters">
+            </div>
+            
+            <div class="form-group">
+                <label for="confirm-password">Confirm Password</label>
+                <input type="password" id="confirm-password" name="confirm_password" required>
+            </div>
+            
+            <div id="register-error" class="alert" style="display: none; margin-bottom: 15px;"></div>
+            
+            <div class="form-actions">
+                <button type="submit" id="register-button" class="btn btn-primary w-100">
+                    <span class="register-text">Create Account</span>
+                    <span class="spinner-border spinner-border-sm d-none" role="status" aria-hidden="true"></span>
+                </button>
+            </div>
+            
+            <div class="form-footer">
+                Already have an account? <a href="/login">Login here</a>
+            </div>
+        </form>
+    </div>
+    
+    <script src="{{ url_for('static', path='/js/auth.js') }}"></script>
 </body>
 </html>
