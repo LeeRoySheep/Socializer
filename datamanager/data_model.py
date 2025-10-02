@@ -9,16 +9,40 @@ from sqlalchemy import (
     JSON,
     Float,
     Date,
+    DateTime,
     ForeignKey,
     create_engine,
     UniqueConstraint,
     text,
+    Text,
+    Boolean,
 )
 from sqlalchemy.orm import relationship, DeclarativeBase, Mapped, mapped_column, sessionmaker, Session
 
-# Define Base for SQLAlchemy ORM
+# Define Base for SQLAlchemy ORM first
 class Base(DeclarativeBase):
     pass
+
+class TokenBlacklist(Base):
+    """Model for storing blacklisted JWT tokens."""
+    __tablename__ = "token_blacklist"
+    
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    token: Mapped[str] = mapped_column(String, unique=True, index=True, nullable=False)
+    expires_at: Mapped[datetime.datetime] = mapped_column(DateTime, nullable=False)
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime, default=datetime.datetime.utcnow, nullable=False
+    )
+    user_id: Mapped[Optional[int]] = mapped_column(
+        Integer, ForeignKey("users.id"), nullable=True
+    )
+    reason: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    
+    # Relationship with User
+    user: Mapped[Optional["User"]] = relationship("User", back_populates="blacklisted_tokens")
+    
+    def __repr__(self) -> str:
+        return f"<TokenBlacklist(id={self.id}, expires_at={self.expires_at})>"
 
 
 class User(Base):
@@ -27,6 +51,7 @@ class User(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     username: Mapped[str] = mapped_column(String, unique=True, nullable=False)
     role: Mapped[str] = mapped_column(String, default="user")
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)  # User account status
     temperature: Mapped[float] = mapped_column(Float, default=0.7)
     preferences: Mapped[dict] = mapped_column(JSON, default=dict)  # JSON for user preferences
     hashed_name: Mapped[str] = mapped_column(String, default="")  # Hashed name for privacy
@@ -43,6 +68,18 @@ class User(Base):
     )
     trainings: Mapped[list["Training"]] = relationship("Training", backref="user")
     user_preferences: Mapped[list["UserPreference"]] = relationship("UserPreference", backref="user")
+    error_logs: Mapped[list["ErrorLog"]] = relationship(
+        "ErrorLog", 
+        back_populates="user",
+        cascade="all, delete-orphan"
+    )
+    
+    # Relationship with blacklisted tokens
+    blacklisted_tokens: Mapped[list["TokenBlacklist"]] = relationship(
+        "TokenBlacklist",
+        back_populates="user",
+        cascade="all, delete-orphan"
+    )
 
     def __repr__(self):
         return f"User(id={self.id}, username={self.username}, role={self.role})"
@@ -158,6 +195,46 @@ class UserPreference(Base):
             "preference_value": self.preference_value,
             "confidence": self.confidence,
             "last_updated": self.last_updated.isoformat() if self.last_updated else None,
+        }
+
+
+class ErrorLog(Base):
+    """Model for tracking errors in the application."""
+    __tablename__ = "error_logs"
+    
+    # Maximum length for error_type field
+    ERROR_TYPE_MAX_LENGTH = 100
+    
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    timestamp: Mapped[datetime.datetime] = mapped_column(DateTime, default=datetime.datetime.utcnow)
+    user_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("users.id"), nullable=True)
+    error_type: Mapped[str] = mapped_column(String(ERROR_TYPE_MAX_LENGTH), nullable=False)
+    error_message: Mapped[str] = mapped_column(Text, nullable=False)
+    stack_trace: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    context: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    
+    def __init__(self, **kwargs):
+        # Truncate error_type if it exceeds the maximum length
+        if 'error_type' in kwargs and len(kwargs['error_type']) > self.ERROR_TYPE_MAX_LENGTH:
+            kwargs['error_type'] = kwargs['error_type'][:self.ERROR_TYPE_MAX_LENGTH]
+        super().__init__(**kwargs)
+    
+    # Relationship to User (optional)
+    user: Mapped[Optional["User"]] = relationship("User", back_populates="error_logs")
+    
+    def __repr__(self):
+        return f"<ErrorLog(id={self.id}, error_type='{self.error_type}', timestamp={self.timestamp})>"
+    
+    def to_dict(self):
+        """Convert the ErrorLog object to a dictionary."""
+        return {
+            "id": self.id,
+            "timestamp": self.timestamp.isoformat(),
+            "user_id": self.user_id,
+            "error_type": self.error_type,
+            "error_message": self.error_message,
+            "stack_trace": self.stack_trace,
+            "context": self.context
         }
 
 
