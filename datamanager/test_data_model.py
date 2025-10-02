@@ -59,7 +59,10 @@ class TestDataModel(unittest.TestCase):
         """Test creating a user."""
         # Create a test user
         user = User(
-            username="test_user", hashed_password="hashed_password", role="user"
+            username="test_user",
+            hashed_password="<PASSWORD>",
+            hashed_email="test@example.com",
+            role="user"
         )
 
         # Add the user using the data manager
@@ -120,8 +123,9 @@ class TestDataModel(unittest.TestCase):
         # Create a test user
         user = User(
             username="skill_user",
-            hashed_password="hashed_password",
-            role="user",
+            hashed_password="<PASSWORD>",
+            hashed_email="skill_user@example.com",
+            role="user"
         )
         added_user = self.dm.add_user(user)
 
@@ -151,8 +155,9 @@ class TestDataModel(unittest.TestCase):
         # Create a test user
         user = User(
             username="training_user",
-            hashed_password="hashed_password",
-            role="user",
+            hashed_password="<PASSWORD>",
+            hashed_email="training_user@example.com",
+            role="user"
         )
         added_user = self.dm.add_user(user)
 
@@ -186,15 +191,22 @@ class TestDataModel(unittest.TestCase):
         updated_user = self.dm.update_user(added_user.id, **{"role": "admin"})
         self.assertIsNotNone(updated_user)
         user_trainings = self.dm.get_training_for_user(updated_user.id)
-        self.assertIn(
-            added_training, user_trainings, "Training not found in user's trainings"
+        
+        # Check if a training with the same user_id and skill_id exists in the user's trainings
+        training_found = any(
+            t.user_id == added_training.user_id and t.skill_id == added_training.skill_id
+            for t in user_trainings
         )
+        self.assertTrue(training_found, "Training not found in user's trainings")
 
     def test_update_training_status(self):
         """Test updating a training status."""
         # Create a test user
         user = User(
-            username="training_user", hashed_password="hashed_password", role="user"
+            username="training_user",
+            hashed_password="<PASSWORD>",
+            hashed_email="training_user@example.com",
+            role="user"
         )
         added_user = self.dm.add_user(user)
 

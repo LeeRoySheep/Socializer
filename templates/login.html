@@ -10,7 +10,7 @@
 <div class="auth-container">
     <h1>Welcome Back! 👋</h1>
 
-    <form id="login-form" class="auth-form" method="POST" action="/api/auth/login">
+    <form id="login-form" class="auth-form">
         <div class="form-group">
             <label for="login-username">Username</label>
             <input type="text" id="login-username" name="username" class="form-control" required>
@@ -36,32 +36,33 @@
     </form>
 </div>
 
-<script src="{{ url_for('static', path='/js/auth.js') }}"></script>
+<script type="module" src="{{ url_for('static', path='/js/auth/index.js') }}"></script>
+<!-- Development test script - Remove in production -->
+<script type="module" src="{{ url_for('static', path='/js/tests/authFlowTest.js') }}"></script>
 <script>
-    // Check for URL parameters
-    const urlParams = new URLSearchParams(window.location.search);
-    const errorParam = urlParams.get('error');
-    const registeredParam = urlParams.get('registered');
+    document.addEventListener('DOMContentLoaded', () => {
+        const urlParams = new URLSearchParams(window.location.search);
+        const errorParam = urlParams.get('error');
+        const registeredParam = urlParams.get('registered');
 
-    // Show error message if present
-    if (errorParam) {
-        const errorElement = document.getElementById('login-error');
-        if (errorElement) {
-            errorElement.textContent = decodeURIComponent(errorParam);
-            errorElement.style.color = '#dc3545';
-            errorElement.style.display = 'block';
+        if (errorParam) {
+            const errorElement = document.getElementById('login-error');
+            if (errorElement) {
+                errorElement.textContent = decodeURIComponent(errorParam);
+                errorElement.style.display = 'block';
+            }
         }
-    }
 
-    // Show success message after registration
-    if (registeredParam === '1') {
-        const errorElement = document.getElementById('login-error');
-        if (errorElement) {
-            errorElement.textContent = 'Registration successful! Please log in with your new credentials.';
-            errorElement.style.color = '#28a745';
-            errorElement.style.display = 'block';
+        if (registeredParam === '1') {
+            const successElement = document.getElementById('login-success') || 
+                                 document.getElementById('login-error');
+            if (successElement) {
+                successElement.textContent = 'Registration successful! Please log in.';
+                successElement.style.color = '#28a745';
+                successElement.style.display = 'block';
+            }
         }
-    }
+    });
 </script>
 </body>
 </html>
