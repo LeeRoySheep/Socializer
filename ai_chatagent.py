@@ -15,6 +15,7 @@ from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.graph import add_messages, StateGraph, END
 from pydantic import BaseModel, Field, field_validator
 from response_formatter import ResponseFormatter
+from format_tool import FormatTool
 
 # Add the project root to the Python path
 project_root = str(Path(__file__).resolve().parent.parent)
@@ -823,9 +824,13 @@ class BasicToolNode:
                 else:
                     tool_result = {"error": f"Tool {tool_name} is not callable"}
 
+                # Format the tool result for readability
+                formatted_result = ResponseFormatter.format_tool_result(tool_name, tool_result)
+                formatted_result = ResponseFormatter.clean_response(formatted_result)
+                
                 outputs.append(
                     ToolMessage(
-                        content=json.dumps(tool_result),
+                        content=formatted_result,
                         name=tool_name,
                         tool_call_id=tool_call["id"],
                     )
@@ -941,17 +946,40 @@ class AiChatagent:
                     "required": ["user_id", "message"],
                 },
             },
+            {
+                "name": "format_output",
+                "description": "Format raw data (JSON, dicts, API responses) into beautiful human-readable text. ALWAYS use this when you receive raw JSON or dict data from other tools before showing it to users.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "data": {
+                            "type": "string",
+                            "description": "The raw data to format (JSON string or dict)",
+                        },
+                        "data_type": {
+                            "type": "string",
+                            "description": "Type of data: 'weather', 'search', 'conversation', or 'auto' (default)",
+                            "enum": ["weather", "search", "conversation", "auto"],
+                        },
+                    },
+                    "required": ["data"],
+                },
+            },
         ]
         
         # Initialize LifeEventTool if DataManager is available
         self.life_event_tool = LifeEventTool(dm) if 'dm' in globals() else None
+        
+        # Initialize FormatTool for making output human-readable
+        self.format_tool = FormatTool()
         
         # Create a mapping of tool names to their instances
         self.tool_instances = {
             "tavily_search": self.tavily_search,
             "recall_last_conversation": self.conversation_tool,
             "skill_evaluator": self.skill_evaluator_tool,
-            "life_event": self.life_event_tool if self.life_event_tool else None
+            "life_event": self.life_event_tool if self.life_event_tool else None,
+            "format_output": self.format_tool
         }
         
         # Remove any None values from tool_instances
@@ -1016,48 +1044,29 @@ class AiChatagent:
                         return {"messages": [{"role": "assistant", 
                                           "content": "I'm having trouble with that request. Let me try a different approach or please rephrase your question."}]}
             
-            # Check if this is a tool call response
+            # If last message is an AIMessage with tool_calls, return it for routing
             if hasattr(last_message, 'tool_calls') and last_message.tool_calls:
-                print("\n=== PROCESSING TOOL CALL ===")
-                tool_call = last_message.tool_calls[0]
-                
-                # Handle both dict and object formats for tool_call
-                if isinstance(tool_call, dict):
-                    tool_name = tool_call.get('name', '')
-                    tool_args = tool_call.get('args', {})
-                else:
-                    tool_name = getattr(tool_call, 'name', '')
-                    # Get tool arguments
-                    if hasattr(tool_call, 'args'):
-                        tool_args = tool_call.args
-                    elif hasattr(tool_call, 'arguments'):
-                        tool_args = json.loads(tool_call.arguments)
-                    else:
-                        tool_args = {}
-                
-                print(f"Tool call: {tool_name} with args: {tool_args}")
-                
-                if tool_name in self.tool_instances:
-                    tool = self.tool_instances[tool_name]
-                    print(f"Found tool instance: {tool_name}")
-                    
-                    try:
-                        print(f"Invoking tool: {tool_name}")
-                        tool_result = tool.invoke(tool_args)
-                        print(f"Tool result type: {type(tool_result).__name__}")
-                        
-                        # Format the tool result using ResponseFormatter for readable output
-                        formatted_response = ResponseFormatter.format_tool_result(tool_name, tool_result)
-                        formatted_response = ResponseFormatter.clean_response(formatted_response)
-                        
-                        return {"messages": [{"role": "assistant", "content": formatted_response}]}
-                    except Exception as e:
-                        print(f"Error invoking tool {tool_name}: {str(e)}")
-                        return {"messages": [{"role": "assistant", 
-                                        "content": f"I encountered an error while processing your request: {str(e)}"}]}
+                print("\n=== TOOL CALLS DETECTED - RETURNING TO GRAPH ===")
+                for tool_call in last_message.tool_calls:
+                    tool_name = tool_call.get('name') if isinstance(tool_call, dict) else getattr(tool_call, 'name', 'unknown')
+                    print(f"   Tool: {tool_name}")
+                return {"messages": [last_message]}
             
-            # If we get here, no tool was found to handle the message
-            print("\n=== PROCESSING REGULAR MESSAGE ===")
+            # If last message is a ToolMessage, we need to process its result
+            is_tool_result = hasattr(last_message, '__class__') and last_message.__class__.__name__ == 'ToolMessage'
+            
+            # Only process if last message is from user or is a tool result
+            # If last message is AIMessage without tool_calls, this shouldn't be called
+            if hasattr(last_message, '__class__'):
+                msg_class = last_message.__class__.__name__
+                if msg_class == 'AIMessage' and not (hasattr(last_message, 'tool_calls') and last_message.tool_calls):
+                    print(f"\n=== SKIPPING: Already have AI response ===")
+                    return {"messages": []}
+            
+            if is_tool_result:
+                print("\n=== PROCESSING TOOL RESULTS ===")
+            else:
+                print("\n=== PROCESSING REGULAR MESSAGE ===")
             
             # Load last 20 messages from database for context
             historical_messages = []
@@ -1098,7 +1107,14 @@ class AiChatagent:
    - Group mode: General clarifications, fun facts (respond to all in conversation)
    - Auto-detect which mode is appropriate based on content
 
-5. GENERAL GUIDELINES
+5. TOOL USAGE
+   - For weather/news/current events: use `tavily_search`
+   - For memory recall: use `recall_last_conversation`
+   - For skill evaluation: use `skill_evaluator`
+   - Tool results are automatically formatted for readability
+   - Simply present the tool results naturally in your response
+
+6. GENERAL GUIDELINES
    - Be warm, supportive, and non-judgmental
    - Provide clear, concise responses
    - If a tool call fails, explain why instead of retrying
@@ -1145,61 +1161,17 @@ class AiChatagent:
             print(f"LLM response: {response}")
             
             # If the response is a tool call, check if it's a repeat
+            # If LLM generated tool calls, return to graph for tool execution
             if hasattr(response, 'tool_calls') and response.tool_calls:
-                tool_call = response.tool_calls[0]
-                
-                # Handle both dict and object formats
-                if isinstance(tool_call, dict):
-                    tool_name = tool_call.get('name', '')
-                    tool_args = tool_call.get('args', {})
-                else:
-                    tool_name = getattr(tool_call, 'name', '')
-                    tool_args = getattr(tool_call, 'args', {})
-                
-                print(f"\n=== PROCESSING TOOL CALL FROM RESPONSE ===")
-                print(f"Tool call name: {tool_name}")
-                print(f"Tool call args: {tool_args}")
-                
-                # Check if this is the same tool call as the last one
-                if len(messages) > 1:
-                    prev_msg = messages[-2]
-                    if (hasattr(prev_msg, 'tool_calls') and prev_msg.tool_calls and 
-                        len(prev_msg.tool_calls) > 0 and 
-                        getattr(prev_msg.tool_calls[0], 'name', '') == tool_name):
-                        print(f"Preventing repeated tool call to {tool_name}")
-                        return {"messages": [{"role": "assistant", 
-                                        "content": "I'm having trouble with that tool. Could you try asking something else?"}]}
-                
-                # Invoke the tool
-                if tool_name in self.tool_instances:
-                    tool = self.tool_instances[tool_name]
-                    print(f"Found tool instance: {tool_name}")
-                    
-                    try:
-                        tool_result = tool.invoke(tool_args)
-                        print(f"Tool result: {tool_result}")
-                        
-                        # Format the tool result for readability
-                        formatted_response = ResponseFormatter.format_tool_result(tool_name, tool_result)
-                        formatted_response = ResponseFormatter.clean_response(formatted_response)
-                        
-                        return {"messages": [{"role": "assistant", "content": formatted_response}]}
-                    except Exception as e:
-                        print(f"Error invoking tool {tool_name}: {str(e)}")
-                        return {"messages": [{"role": "assistant", 
-                                        "content": f"I encountered an error while processing your request: {str(e)}"}]}
-                else:
-                    print(f"Tool {tool_name} not found in tool_instances")
-                    return {"messages": [{"role": "assistant", 
-                                    "content": "I don't have the capability to process that request."}]}
+                print(f"\n=== LLM GENERATED TOOL CALLS - RETURNING TO GRAPH ===")
+                for tool_call in response.tool_calls:
+                    tool_name = tool_call.get('name') if isinstance(tool_call, dict) else getattr(tool_call, 'name', 'unknown')
+                    print(f"   Tool: {tool_name}")
+                # Return the AIMessage with tool_calls - graph will route to tools node
+                return {"messages": [response]}
             
-            # If it's a regular message, just return it
-            if hasattr(response, 'content'):
-                return {"messages": [{"role": "assistant", "content": response.content}]}
-            elif isinstance(response, str):
-                return {"messages": [{"role": "assistant", "content": response}]}
-            else:
-                return {"messages": [{"role": "assistant", "content": str(response)}]}
+            # Regular response (no tool calls) - return it
+            return {"messages": [response]}
                 
         except Exception as e:
             error_msg = str(e)
@@ -1223,8 +1195,8 @@ class AiChatagent:
 
     def route_tools(self, state: State):
         """
-        Route to the appropriate tool based on the last message content.
-        Returns the name of the tool to use or END if no tool is needed.
+        Route to the appropriate tool based on the last message.
+        Returns "tools" if tool_calls are present, otherwise END.
         """
         try:
             if isinstance(state, list):
@@ -1237,31 +1209,14 @@ class AiChatagent:
                 
             last_message = messages[-1]
             
-            # Check for tool calls in the message
+            # ONLY route to tools if there are actual tool_calls
+            # This is the ONLY condition that should trigger tools
             if hasattr(last_message, "tool_calls") and last_message.tool_calls:
+                print(f"[ROUTE] Found tool_calls -> routing to tools node")
                 return "tools"
-                
-            # Check for specific keywords that should trigger tools
-            if isinstance(last_message, dict):
-                content = last_message.get("content", "").lower()
-            else:
-                content = getattr(last_message, "content", "").lower()
             
-            # Route to search tool for information queries
-            search_keywords = ["time", "weather", "news", "search", "look up", "what is", "who is", "when is", "where is"]
-            if any(keyword in content for keyword in search_keywords):
-                # Let the LLM handle it with tool calling capabilities
-                # It will decide whether to use tools or not
-                return END
-                
-            # Route to conversation recall for context questions
-            if any(keyword in content for keyword in ["remember", "recall", "before", "previous", "earlier"]):
-                return "tools"
-                
-            # For skill evaluation (happens automatically in chatbot)
-            if any(keyword in content for keyword in ["evaluate", "skill", "how am i doing", "my progress"]):
-                return "tools"
-                
+            # If it's a regular message (user or assistant), END the conversation
+            print(f"[ROUTE] No tool_calls -> END")
             return END
             
         except Exception as e:
@@ -1297,6 +1252,7 @@ class AiChatagent:
         graph_builder.set_entry_point("chatbot")
         
         # Compile and return the graph
+        # Note: ai_manager handles checkpointing separately
         return graph_builder.compile()
 
 class ChatSession:

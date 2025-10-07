@@ -66,7 +66,10 @@ class AIAgentManager:
             if not thread_id:
                 thread_id = str(user_id)
             
-            config = {"configurable": {"thread_id": thread_id}}
+            config = {
+                "configurable": {"thread_id": thread_id},
+                "recursion_limit": 50  # Allow multi-step tool workflows (search -> format)
+            }
             
             # Use the lock to ensure thread safety for this session
             with user_lock:

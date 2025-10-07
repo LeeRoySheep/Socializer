@@ -190,8 +190,8 @@ ai_manager = AIAgentManager()
 app = FastAPI(
     title="Socializer API",
     version="0.1.0",
-    docs_url="/api/docs",
-    redoc_url="/api/redoc"
+    docs_url="/docs",
+    redoc_url="/redoc"
 )
 
 # Set up CORS
