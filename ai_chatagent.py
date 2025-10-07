@@ -1109,10 +1109,10 @@ class AiChatagent:
 
 5. TOOL USAGE
    - For weather/news/current events: use `tavily_search`
-   - For memory recall: use `recall_last_conversation`
+   - For memory recall: use `recall_last_conversation` (when user asks "what did we talk about?", "do you remember?", etc.)
    - For skill evaluation: use `skill_evaluator`
    - Tool results are automatically formatted for readability
-   - Simply present the tool results naturally in your response
+   - IMPORTANT: When you receive tool results, summarize them naturally - don't just say you got results, USE the information to answer the user's question
 
 6. GENERAL GUIDELINES
    - Be warm, supportive, and non-judgmental
