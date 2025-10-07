@@ -1,0 +1,110 @@
+/* Online Users List */
+.online-users-panel {
+    width: 250px;
+    background-color: #f8f9fa;
+    border-left: 1px solid #dee2e6;
+    padding: 15px;
+    overflow-y: auto;
+    height: 100%;
+}
+
+.online-users-title {
+    font-size: 16px;
+    font-weight: 600;
+    margin-bottom: 15px;
+    color: #333;
+    padding-bottom: 10px;
+    border-bottom: 1px solid #dee2e6;
+}
+
+.online-users-container {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.online-user {
+    display: flex;
+    align-items: center;
+    padding: 8px 10px;
+    border-radius: 4px;
+    transition: background-color 0.2s;
+}
+
+.online-user:hover {
+    background-color: #e9ecef;
+}
+
+.user-status {
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    margin-right: 10px;
+}
+
+.user-status.online {
+    background-color: #28a745;
+}
+
+.user-status.offline {
+    background-color: #6c757d;
+}
+
+.user-status.away {
+    background-color: #ffc107;
+}
+
+.user-status.busy {
+    background-color: #dc3545;
+}
+
+.user-name {
+    font-size: 14px;
+    color: #333;
+}
+
+/* System Messages */
+.system-message {
+    margin: 10px 0;
+    padding: 8px 12px;
+    border-radius: 4px;
+    font-size: 13px;
+    text-align: center;
+    background-color: #f8f9fa;
+    color: #6c757d;
+    border-left: 3px solid transparent;
+}
+
+.system-message.system-info {
+    border-left-color: #17a2b8;
+}
+
+.system-message.system-success {
+    border-left-color: #28a745;
+}
+
+.system-message.system-error {
+    border-left-color: #dc3545;
+}
+
+.system-message.system-warning {
+    border-left-color: #ffc107;
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+    .online-users-panel {
+        width: 200px;
+    }
+}
+
+@media (max-width: 576px) {
+    .online-users-panel {
+        width: 100%;
+        border-left: none;
+        border-top: 1px solid #dee2e6;
+        height: auto;
+        max-height: 200px;
+    }
+}

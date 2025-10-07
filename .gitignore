@@ -41,11 +41,17 @@ ENV/
 *.db
 *.sqlite3
 *.sqlite
+*.db-journal
+*.db-shm
+*.db-wal
+data.sqlite.db
+chat_agent.db
+test*.db
+users_datas.db
 
 # Logs and databases
 *.log
 *.sql
-*.sqlite
 
 # Coverage reports
 htmlcov/
@@ -70,3 +76,27 @@ coverage.xml
 # Distribution / packaging
 .Python
 build/
+
+# Node modules
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Test files (keep in tests/ directory only)
+test_*.py
+test_*.js
+test_*.html
+*_test.py
+*_test.js
+*_test.html
+websocket_test*
+auth_test*
+ws_debug*
+simple_*_test*
+
+# Temporary files
+*.tmp
+*.temp
+*.bak
+*.swp

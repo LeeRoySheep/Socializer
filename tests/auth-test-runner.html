@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AuthService Tests</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/jasmine/3.6.0/jasmine.css">
+    <style>
+        body {
+            padding: 20px;
+            font-family: Arial, sans-serif;
+        }
+        .jasmine_html-reporter {
+            margin: 20px auto;
+            max-width: 1200px;
+        }
+    </style>
+</head>
+<body>
+    <h1>AuthService Tests</h1>
+    
+    <!-- Jasmine Test Runner -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jasmine/3.6.0/jasmine.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jasmine/3.6.0/jasmine-html.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jasmine/3.6.0/boot.js"></script>
+    
+    <!-- Mock implementation for tests -->
+    <script>
+        // Mock localStorage for tests
+        const localStorageMock = (function() {
+            let store = {};
+            return {
+                getItem: function(key) {
+                    return store[key] || null;
+                },
+                setItem: function(key, value) {
+                    store[key] = value.toString();
+                },
+                removeItem: function(key) {
+                    delete store[key];
+                },
+                clear: function() {
+                    store = {};
+                }
+            };
+        })();
+        
+        // Mock fetch
+        const mockFetch = (status, data) => ({
+            ok: status >= 200 && status < 300,
+            status,
+            json: () => Promise.resolve(data),
+            text: () => Promise.resolve(JSON.stringify(data))
+        });
+        
+        // Make mocks available globally
+        window.localStorage = localStorageMock;
+        window.fetch = jest.fn();
+    </script>
+    
+    <!-- Source files -->
+    <script src="/static/js/auth/AuthService.js"></script>
+    
+    <!-- Test files -->
+    <script src="/static/js/tests/AuthService.test.js"></script>
+    
+    <script>
+        // Initialize Jasmine
+        window.onload = function() {
+            window.jasmine.getEnv().execute();
+        };
+    </script>
+</body>
+</html>

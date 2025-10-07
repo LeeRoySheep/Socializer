@@ -1,0 +1,52 @@
+{
+  "name": "socializer-frontend",
+  "version": "1.0.0",
+  "description": "Frontend for Socializer application",
+  "type": "commonjs",
+  "scripts": {
+    "test": "NODE_OPTIONS=--experimental-vm-modules jest",
+    "test:watch": "NODE_OPTIONS=--experimental-vm-modules jest --watch",
+    "test:integration": "NODE_OPTIONS=--experimental-vm-modules jest --testMatch='**/__tests__/*.test.js'"
+  },
+  "jest": {
+    "testEnvironment": "jsdom",
+    "transform": {
+      "^.+\\.js$": "babel-jest"
+    },
+    "moduleNameMapper": {
+      "^\\.(css|less|scss|sass)$": "identity-obj-proxy"
+    },
+    "setupFilesAfterEnv": [
+      "<rootDir>/jest.setup.js"
+    ],
+    "testMatch": [
+      "**/__tests__/**/*.test.js",
+      "**/tests/frontend/**/*.test.js"
+    ],
+    "transformIgnorePatterns": [
+      "/node_modules/(?!(node-fetch|ws)/)"
+    ],
+    "testPathIgnorePatterns": [
+      "/node_modules/"
+    ]
+  },
+  "devDependencies": {
+    "@babel/preset-env": "^7.23.5",
+    "@testing-library/dom": "^9.3.1",
+    "@testing-library/jest-dom": "^6.1.5",
+    "@testing-library/user-event": "^14.5.1",
+    "babel-jest": "^29.7.0",
+    "identity-obj-proxy": "^3.0.0",
+    "jest": "^29.7.0",
+    "jest-environment-jsdom": "^29.7.0",
+    "jsdom": "^20.0.3",
+    "node-fetch": "^2.6.7",
+    "ws": "^8.14.2"
+  },
+  "dependencies": {
+    "cookie": "^1.0.2",
+    "fetch-cookie": "^3.1.0",
+    "tough-cookie": "^6.0.0",
+    "uuid": "^9.0.0"
+  }
+}
