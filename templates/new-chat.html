@@ -328,6 +328,156 @@
             box-shadow: 0 5px 15px rgba(40, 167, 69, 0.4);
         }
 
+        /* AI Toggle and Listening Indicator */
+        .ai-toggle {
+            background: #f8f9fa;
+            border: 2px solid #dee2e6;
+            color: #6c757d;
+            padding: 0.5rem 1rem;
+            border-radius: 20px;
+            font-size: 0.85rem;
+            transition: all 0.3s ease;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            cursor: pointer;
+        }
+
+        .ai-toggle:hover {
+            border-color: #667eea;
+            color: #667eea;
+        }
+
+        .ai-toggle.active {
+            background: linear-gradient(45deg, #667eea, #764ba2);
+            border-color: #667eea;
+            color: white;
+            box-shadow: 0 3px 10px rgba(102, 126, 234, 0.3);
+        }
+
+        .ai-listening-indicator {
+            display: none;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.5rem 1rem;
+            background: #e8f5e9;
+            border-radius: 15px;
+            color: #2e7d32;
+            font-size: 0.85rem;
+        }
+
+        .ai-listening-indicator.active {
+            display: flex;
+        }
+
+        .listening-pulse {
+            width: 10px;
+            height: 10px;
+            background: #4caf50;
+            border-radius: 50%;
+            animation: pulse 1.5s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.5; transform: scale(1.2); }
+        }
+
+        /* System Messages */
+        .message.system-message {
+            align-self: center;
+            max-width: 80%;
+        }
+
+        .message.ai-message {
+            background: linear-gradient(135deg, #e8f5e9, #c8e6c9);
+            border-left: 4px solid #4caf50;
+        }
+
+        .message.ai-message .message-content {
+            color: #1b5e20;
+        }
+
+        .message.info-message {
+            background: #e3f2fd;
+            border-left: 4px solid #2196f3;
+        }
+
+        .message.info-message .message-content {
+            color: #0d47a1;
+        }
+
+        .message.error-message {
+            background: #ffebee;
+            border-left: 4px solid #f44336;
+        }
+
+        .message.error-message .message-content {
+            color: #c62828;
+        }
+
+        .message.ai-suggestion {
+            animation: slideInFromBottom 0.3s ease;
+            border: 3px solid #2196f3;
+            cursor: pointer !important;
+            transition: all 0.3s ease;
+            box-shadow: 0 2px 8px rgba(33, 150, 243, 0.2);
+            pointer-events: auto !important;
+            z-index: 1000;
+            position: relative;
+        }
+
+        .message.ai-suggestion:hover {
+            transform: scale(1.02) translateY(-2px);
+            box-shadow: 0 6px 16px rgba(33, 150, 243, 0.4);
+            border-color: #1976d2;
+            background: #e3f2fd;
+        }
+
+        .message.ai-suggestion:active {
+            transform: scale(0.98);
+        }
+
+        @keyframes slideInFromBottom {
+            from {
+                opacity: 0;
+                transform: translateY(20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        /* AI Typing Indicator */
+        .ai-typing {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 1rem 1.5rem;
+            background: linear-gradient(135deg, #e8f5e9, #c8e6c9);
+            border-radius: 18px;
+            margin: 0.5rem 0;
+            max-width: 200px;
+        }
+
+        .ai-typing span {
+            width: 8px;
+            height: 8px;
+            background: #4caf50;
+            border-radius: 50%;
+            display: inline-block;
+            animation: bounce 1.4s infinite ease-in-out both;
+        }
+
+        .ai-typing span:nth-child(1) { animation-delay: -0.32s; }
+        .ai-typing span:nth-child(2) { animation-delay: -0.16s; }
+
+        @keyframes bounce {
+            0%, 80%, 100% { transform: scale(0); opacity: 0.5; }
+            40% { transform: scale(1); opacity: 1; }
+        }
+
         /* Responsive Design */
         @media (max-width: 768px) {
             .left-sidebar {
@@ -448,12 +598,20 @@
 
                 <form id="message-form" class="send-area">
                     <div class="message-input-container">
-                        <input type="text" id="message-input" placeholder="Type your message..." autocomplete="off">
+                        <input type="text" id="message-input" placeholder="Type your message... (use /ai for AI assistant)" autocomplete="off">
                     </div>
                     <div class="send-controls">
-                        <button type="button" id="ai-btn" class="ai-btn" title="Send with AI Response">
+                        <button type="button" id="ai-toggle" class="ai-toggle" title="Toggle AI Passive Listening">
                             <i class="bi bi-robot"></i>
-                            AI
+                            <span class="ai-toggle-text">AI Off</span>
+                        </button>
+                        <div id="ai-listening-indicator" class="ai-listening-indicator">
+                            <div class="listening-pulse"></div>
+                            <span>Listening...</span>
+                        </div>
+                        <button type="button" id="ai-btn" class="ai-btn" title="Ask AI Assistant">
+                            <i class="bi bi-stars"></i>
+                            Ask AI
                         </button>
                         <button type="submit" id="send-btn" class="send-btn" title="Send Message">
                             <i class="bi bi-send"></i>

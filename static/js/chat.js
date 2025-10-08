@@ -48,6 +48,13 @@ const currentUser = window.currentUser || {
 // Add room info to user object
 currentUser.room = currentRoom;
 
+// AI Assistant State
+let isAIActive = false;
+let isListening = false;
+let aiTypingIndicator = null;
+let passiveListeningTimer = null;
+let lastSuggestedHelp = 0;
+
 // Get and validate the authentication token
 const AUTH_TOKEN = (() => {
     const token = window.ACCESS_TOKEN || getTokenFromStorage();
@@ -239,6 +246,545 @@ function getWebSocketState(state) {
 }
 
 // ============================================
+// AI Assistant Functions
+// ============================================
+
+// Track if auto-assistance mode is enabled
+let autoAssistanceEnabled = true; // Default: ON
+
+// Store recent conversation context for AI monitoring
+let conversationContext = [];
+const MAX_CONTEXT_MESSAGES = 10;
+
+// Throttle AI monitoring to avoid too many requests
+let lastMonitoringTime = 0;
+const MONITORING_THROTTLE_MS = 3000; // Only monitor every 3 seconds max
+
+function addToConversationContext(username, content) {
+    conversationContext.push({
+        username: username,
+        content: content,
+        timestamp: Date.now()
+    });
+    
+    // Keep only last N messages
+    if (conversationContext.length > MAX_CONTEXT_MESSAGES) {
+        conversationContext.shift();
+    }
+}
+
+function monitorConversationForAssistance(content, username) {
+    if (!isAIActive || !content || !autoAssistanceEnabled) return;
+    
+    console.log('[AI] 🔍 AI monitoring conversation from:', username);
+    
+    // Add to context (always track context)
+    addToConversationContext(username, content);
+    
+    // Throttle monitoring requests
+    const now = Date.now();
+    const timeSinceLastMonitoring = now - lastMonitoringTime;
+    
+    if (timeSinceLastMonitoring < MONITORING_THROTTLE_MS) {
+        console.log(`[AI] Monitoring throttled (wait ${Math.ceil((MONITORING_THROTTLE_MS - timeSinceLastMonitoring) / 1000)}s)`);
+        return;
+    }
+    
+    lastMonitoringTime = now;
+    
+    // Send conversation context to AI agent for intelligent monitoring
+    // The AI agent will decide if intervention is needed
+    const contextSummary = conversationContext.slice(-5).map(msg => 
+        `${msg.username}: ${msg.content}`
+    ).join('\n');
+    
+    console.log('[AI] Sending context to AI for monitoring:', {
+        messageCount: conversationContext.length,
+        latestMessage: `${username}: ${content}`
+    });
+    
+    // Send to AI agent with special monitoring prompt
+    // The AI will respond ONLY if it detects a need for help
+    sendConversationForMonitoring(contextSummary, username, content);
+}
+
+async function sendConversationForMonitoring(contextSummary, username, latestContent) {
+    try {
+        // Create monitoring request
+        const monitoringPrompt = `CONVERSATION MONITORING REQUEST
+
+Latest message from ${username}: "${latestContent}"
+
+Recent conversation context:
+${contextSummary}
+
+INSTRUCTIONS:
+- You are monitoring this conversation in real-time
+- Analyze if intervention is needed for:
+  * Foreign language barriers (any language)
+  * Confusion or misunderstandings (expressed in any language)
+  * Communication breakdown
+  * Cultural misunderstandings
+  
+- If intervention IS needed: Provide translation, clarification, or explanation directly
+- If intervention is NOT needed: Respond with exactly "NO_INTERVENTION_NEEDED"
+- Be proactive - help immediately when you detect issues
+- Work with ALL languages, not just English
+
+Should you intervene?`;
+
+        const response = await fetch('/api/ai-chat', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${AUTH_TOKEN}`
+            },
+            body: JSON.stringify({
+                message: monitoringPrompt,
+                thread_id: `chat-monitor-${currentUser.id}`
+            })
+        });
+        
+        if (response.ok) {
+            const data = await response.json();
+            console.log('[AI] 📥 AI monitoring response received:', {
+                hasResponse: !!data.response,
+                responsePreview: data.response ? data.response.substring(0, 100) : 'null',
+                toolsUsed: data.tools_used
+            });
+            
+            // Check if AI decided to intervene
+            if (data.response && !data.response.includes('NO_INTERVENTION_NEEDED')) {
+                console.log('[AI] ✅ AI decided to intervene:', data.response.substring(0, 100));
+                
+                console.log('[AI] 🎬 Calling displayAIMessage...');
+                // Display AI's intervention
+                displayAIMessage(data.response, data.tools_used);
+                console.log('[AI] 🎬 displayAIMessage call completed');
+                
+                console.log('[AI] 🎬 Calling displaySystemMessage...');
+                displaySystemMessage(
+                    '🤖 AI detected a communication issue and is helping... (Type "/ai stop" to disable)',
+                    'info-message'
+                );
+                console.log('[AI] 🎬 displaySystemMessage call completed');
+            } else {
+                console.log('[AI] ℹ️ AI monitoring - no intervention needed');
+            }
+        } else {
+            console.error('[AI] ❌ AI monitoring response not OK:', response.status, response.statusText);
+        }
+    } catch (error) {
+        console.error('[AI] Monitoring error (silent):', error);
+        // Fail silently - don't disrupt user experience
+    }
+}
+
+function startPassiveListening() {
+    console.log('[AI] Starting passive listening...');
+    const messageInput = document.getElementById('message-input');
+    
+    if (!messageInput) return;
+    
+    // Clear any existing listener
+    stopPassiveListening();
+    
+    // Add input listener for passive help
+    messageInput.addEventListener('input', handlePassiveListening);
+    console.log('[AI] Passive listening active');
+}
+
+function stopPassiveListening() {
+    console.log('[AI] Stopping passive listening...');
+    const messageInput = document.getElementById('message-input');
+    
+    if (messageInput) {
+        messageInput.removeEventListener('input', handlePassiveListening);
+    }
+    
+    if (passiveListeningTimer) {
+        clearTimeout(passiveListeningTimer);
+        passiveListeningTimer = null;
+    }
+}
+
+function handlePassiveListening(event) {
+    if (!isAIActive || !isListening) {
+        console.log('[AI] Passive listening inactive:', { isAIActive, isListening });
+        return;
+    }
+    
+    const text = event.target.value.trim();
+    console.log('[AI] Input changed:', text);
+    
+    // Clear existing timer
+    if (passiveListeningTimer) {
+        clearTimeout(passiveListeningTimer);
+    }
+    
+    // Wait for user to stop typing for 2 seconds
+    passiveListeningTimer = setTimeout(() => {
+        if (!text) {
+            console.log('[AI] No text, skipping suggestion');
+            return;
+        }
+        
+        console.log('[AI] Analyzing text for suggestions:', text);
+        
+        // Check if message looks like a question or request for help
+        const isQuestion = text.endsWith('?');
+        const hasHelpKeywords = /\b(help|how|what|where|when|why|who|can you|could you|please|advice|tip|suggest)\b/i.test(text);
+        
+        // Check for translation requests (more lenient)
+        const hasTranslateKeywords = /\b(translate|translation|traduce|traduire|übersetzen|mean|how do you say|what does|como se dice)\b/i.test(text);
+        
+        // Check for non-ASCII characters (possible foreign language) - lowered threshold to 5 chars
+        const hasNonAscii = /[^\x00-\x7F]/.test(text);
+        const likelyForeignLanguage = hasNonAscii && text.length > 5;
+        
+        console.log('[AI] Detection results:', {
+            isQuestion,
+            hasHelpKeywords,
+            hasTranslateKeywords,
+            hasNonAscii,
+            likelyForeignLanguage,
+            textLength: text.length
+        });
+        
+        // Don't suggest too frequently (max once per 30 seconds)
+        const now = Date.now();
+        const timeSinceLastSuggestion = now - lastSuggestedHelp;
+        if (timeSinceLastSuggestion < 30000) {
+            console.log('[AI] Rate limited, wait:', Math.ceil((30000 - timeSinceLastSuggestion) / 1000), 'seconds');
+            return;
+        }
+        
+        if (isQuestion || hasHelpKeywords || hasTranslateKeywords || likelyForeignLanguage) {
+            console.log('[AI] Creating suggestion!');
+            lastSuggestedHelp = now;
+            
+            // Store the text that triggered the suggestion
+            const capturedText = text;
+            
+            // Create suggestion element
+            const messagesContainer = document.getElementById('messages');
+            if (!messagesContainer) return;
+            
+            const suggestionDiv = document.createElement('div');
+            suggestionDiv.className = 'message info-message ai-suggestion';
+            suggestionDiv.style.cursor = 'pointer';
+            suggestionDiv.style.transition = 'all 0.3s ease';
+            suggestionDiv.style.userSelect = 'none';
+            suggestionDiv.setAttribute('role', 'button');
+            suggestionDiv.setAttribute('tabindex', '0');
+            console.log('[AI] Suggestion element created');
+            
+            const contentDiv = document.createElement('div');
+            contentDiv.className = 'message-content';
+            
+            // Determine suggestion message based on what triggered it
+            let suggestionText = 'Would you like me to help with that?';
+            let icon = '💡';
+            
+            if (hasTranslateKeywords) {
+                suggestionText = 'Need help with translation?';
+                icon = '🌐';
+            } else if (likelyForeignLanguage) {
+                suggestionText = 'Would you like me to translate or help with this?';
+                icon = '🌐';
+            } else if (isQuestion) {
+                suggestionText = 'I can help answer that question!';
+                icon = '💡';
+            }
+            
+            contentDiv.innerHTML = `
+                ${icon} <strong>AI Suggestion:</strong> ${suggestionText}<br>
+                <small style="opacity: 0.8; display: block; margin-top: 4px;">"${capturedText.substring(0, 50)}${capturedText.length > 50 ? '...' : ''}"</small>
+                <small style="opacity: 0.7; display: block; margin-top: 4px;">👆 Click anywhere on this box to ask AI</small>
+            `;
+            
+            // Ensure content doesn't block clicks
+            contentDiv.style.pointerEvents = 'none';
+            
+            suggestionDiv.appendChild(contentDiv);
+            
+            // Test: Add multiple event listeners to debug
+            console.log('[AI] Attaching click handlers...');
+            
+            // Handler 1: Simple test (should ALWAYS fire)
+            suggestionDiv.onclick = function() {
+                console.log('[AI] 🎯 ONCLICK FIRED! (This proves element is clickable)');
+                alert('Suggestion clicked! Check console for details.');
+            };
+            
+            // Handler 2: addEventListener (our main handler)
+            suggestionDiv.addEventListener('click', function(e) {
+                console.log('[AI] 🎯 CLICK EVENT LISTENER FIRED!');
+                console.log('[AI] Event details:', {
+                    type: e.type,
+                    target: e.target,
+                    currentTarget: e.currentTarget,
+                    bubbles: e.bubbles,
+                    capturedText: capturedText
+                });
+                
+                e.preventDefault();
+                e.stopPropagation();
+                
+                console.log('[AI] ✅ Processing click with captured text:', capturedText);
+                
+                try {
+                    // Send to AI
+                    console.log('[AI] Calling handleAICommand...');
+                    handleAICommand(`/ai ${capturedText}`);
+                    console.log('[AI] ✅ Command sent successfully');
+                    
+                    // Clear input
+                    const input = document.getElementById('message-input');
+                    if (input) {
+                        input.value = '';
+                        console.log('[AI] ✅ Input cleared');
+                    }
+                    
+                    // Remove suggestion
+                    suggestionDiv.remove();
+                    console.log('[AI] ✅ Suggestion removed');
+                } catch (error) {
+                    console.error('[AI] ❌ Error handling click:', error);
+                    alert('Error: ' + error.message);
+                }
+            }, false);
+            
+            // Handler 3: Mousedown (backup)
+            suggestionDiv.addEventListener('mousedown', function() {
+                console.log('[AI] 🖱️ MOUSEDOWN detected');
+            });
+            
+            // Handler 4: Mouseup (backup)
+            suggestionDiv.addEventListener('mouseup', function() {
+                console.log('[AI] 🖱️ MOUSEUP detected');
+            });
+            
+            console.log('[AI] ✅ All click handlers attached');
+            
+            // Add hover effect
+            suggestionDiv.addEventListener('mouseenter', () => {
+                suggestionDiv.style.transform = 'scale(1.02)';
+                suggestionDiv.style.boxShadow = '0 4px 12px rgba(33, 150, 243, 0.3)';
+            });
+            
+            suggestionDiv.addEventListener('mouseleave', () => {
+                suggestionDiv.style.transform = 'scale(1)';
+                suggestionDiv.style.boxShadow = 'none';
+            });
+            
+            messagesContainer.appendChild(suggestionDiv);
+            messagesContainer.scrollTop = messagesContainer.scrollHeight;
+            console.log('[AI] ✅ Suggestion added to DOM and visible');
+            
+            // Add keyboard support (Enter/Space to activate)
+            suggestionDiv.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    suggestionDiv.click();
+                }
+            });
+            
+            // Auto-remove after 10 seconds
+            setTimeout(() => {
+                if (suggestionDiv.parentNode) {
+                    suggestionDiv.style.opacity = '0';
+                    setTimeout(() => suggestionDiv.remove(), 300);
+                }
+            }, 10000);
+        } else {
+            console.log('[AI] ❌ No trigger matched - no suggestion created');
+        }
+    }, 2000); // Wait 2 seconds after user stops typing
+}
+
+function toggleAIAssistant() {
+    isAIActive = !isAIActive;
+    const toggleBtn = document.getElementById('ai-toggle');
+    const toggleText = toggleBtn.querySelector('.ai-toggle-text');
+    const listeningIndicator = document.getElementById('ai-listening-indicator');
+    
+    if (isAIActive) {
+        toggleBtn.classList.add('active');
+        toggleText.textContent = 'AI On';
+        listeningIndicator.classList.add('active');
+        isListening = true;
+        displaySystemMessage('🤖 AI Assistant activated! I\'m passively listening. Type normally or use /ai for direct questions.', 'info-message');
+        localStorage.setItem('aiAssistantEnabled', 'true');
+        
+        // Start passive listening
+        startPassiveListening();
+    } else {
+        toggleBtn.classList.remove('active');
+        toggleText.textContent = 'AI Off';
+        listeningIndicator.classList.remove('active');
+        isListening = false;
+        displaySystemMessage('AI Assistant deactivated.', 'info-message');
+        localStorage.setItem('aiAssistantEnabled', 'false');
+        
+        // Stop passive listening
+        stopPassiveListening();
+    }
+}
+
+function showAITypingIndicator() {
+    const messagesContainer = document.getElementById('messages');
+    if (!messagesContainer) return;
+    
+    // Remove any existing typing indicator
+    hideAITypingIndicator();
+    
+    const typingDiv = document.createElement('div');
+    typingDiv.id = 'ai-typing-indicator';
+    typingDiv.className = 'message ai-typing';
+    typingDiv.innerHTML = `
+        <span></span>
+        <span></span>
+        <span></span>
+    `;
+    messagesContainer.appendChild(typingDiv);
+    messagesContainer.scrollTop = messagesContainer.scrollHeight;
+    aiTypingIndicator = typingDiv;
+}
+
+function hideAITypingIndicator() {
+    if (aiTypingIndicator) {
+        aiTypingIndicator.remove();
+        aiTypingIndicator = null;
+    }
+    const existing = document.getElementById('ai-typing-indicator');
+    if (existing) {
+        existing.remove();
+    }
+}
+
+async function handleAICommand(message) {
+    const aiPrompt = message.replace(/^\/ai\s*/i, '').trim();
+    
+    // Check for "stop" command (stop AI monitoring/assistance)
+    if (/^stop/i.test(aiPrompt)) {
+        autoAssistanceEnabled = false;
+        console.log('[AI] Auto-assistance mode DISABLED by user');
+        displaySystemMessage(
+            '✋ AI monitoring stopped. I will no longer automatically help with translations or clarifications. ' +
+            'Type "/ai start" to re-enable.',
+            'info-message'
+        );
+        return;
+    }
+    
+    // Check for "start" command (start AI monitoring/assistance)
+    if (/^start/i.test(aiPrompt)) {
+        autoAssistanceEnabled = true;
+        console.log('[AI] Auto-assistance mode ENABLED by user');
+        displaySystemMessage(
+            '✅ AI monitoring enabled. I will automatically detect and help with language barriers and misunderstandings.',
+            'info-message'
+        );
+        return;
+    }
+    
+    if (!aiPrompt) {
+        displaySystemMessage('Please provide a question after /ai. Example: /ai What\'s the weather?', 'info-message');
+        return;
+    }
+    
+    // Show typing indicator
+    showAITypingIndicator();
+    
+    try {
+        const response = await fetch('/api/ai-chat', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${AUTH_TOKEN}`
+            },
+            body: JSON.stringify({
+                message: aiPrompt,
+                thread_id: `chat-${currentUser.id}`
+            })
+        });
+        
+        hideAITypingIndicator();
+        
+        if (response.ok) {
+            const data = await response.json();
+            displayAIMessage(data.response, data.tools_used);
+        } else {
+            const errorData = await response.json();
+            displaySystemMessage(`❌ AI Error: ${errorData.detail || 'Unknown error'}`, 'error-message');
+        }
+    } catch (error) {
+        hideAITypingIndicator();
+        console.error('AI Error:', error);
+        displaySystemMessage('❌ Failed to connect to AI assistant. Please try again.', 'error-message');
+    }
+}
+
+function displaySystemMessage(text, className = 'system-message') {
+    const messagesContainer = document.getElementById('messages');
+    if (!messagesContainer) return;
+    
+    const messageDiv = document.createElement('div');
+    messageDiv.className = `message ${className}`;
+    
+    const contentDiv = document.createElement('div');
+    contentDiv.className = 'message-content';
+    contentDiv.innerHTML = escapeHtml(text);
+    
+    messageDiv.appendChild(contentDiv);
+    messagesContainer.appendChild(messageDiv);
+    messagesContainer.scrollTop = messagesContainer.scrollHeight;
+}
+
+function displayAIMessage(text, tools = null) {
+    console.log('[AI] 📨 displayAIMessage called with text:', text.substring(0, 100));
+    
+    const messagesContainer = document.getElementById('messages');
+    if (!messagesContainer) {
+        console.error('[AI] ❌ Messages container not found!');
+        return;
+    }
+    
+    console.log('[AI] ✅ Messages container found');
+    
+    const messageDiv = document.createElement('div');
+    messageDiv.className = 'message ai-message';
+    
+    const contentDiv = document.createElement('div');
+    contentDiv.className = 'message-content';
+    
+    try {
+        contentDiv.innerHTML = `<strong>🤖 AI Assistant:</strong><br>${escapeHtml(text)}`;
+        console.log('[AI] ✅ Content HTML set');
+    } catch (error) {
+        console.error('[AI] ❌ Error setting innerHTML:', error);
+        contentDiv.innerHTML = `<strong>🤖 AI Assistant:</strong><br>${text}`;
+    }
+    
+    if (tools && tools.length > 0) {
+        const toolsInfo = document.createElement('div');
+        toolsInfo.style.fontSize = '0.75rem';
+        toolsInfo.style.marginTop = '0.5rem';
+        toolsInfo.style.opacity = '0.8';
+        toolsInfo.innerHTML = `<i class="bi bi-tools"></i> Tools: ${tools.join(', ')}`;
+        contentDiv.appendChild(toolsInfo);
+        console.log('[AI] ✅ Tools info added');
+    }
+    
+    messageDiv.appendChild(contentDiv);
+    messagesContainer.appendChild(messageDiv);
+    messagesContainer.scrollTop = messagesContainer.scrollHeight;
+    
+    console.log('[AI] ✅ AI message displayed successfully');
+}
+
+// ============================================
 // WebSocket Connection
 // ============================================
 
@@ -341,6 +887,25 @@ function handleIncomingMessage(event) {
                 timestamp: message.timestamp,
                 messageType: 'chat_message'
             });
+            
+            // AI Intelligent Monitoring - Let AI agent decide when to help
+            console.log('[AI] Passing message to AI for intelligent monitoring:', {
+                isAIActive,
+                username: message.username,
+                content: message.content
+            });
+            
+            if (isAIActive && autoAssistanceEnabled) {
+                // Send ALL messages to AI for monitoring
+                // AI will decide if translation, clarification, or help is needed
+                // Works with ALL languages, not just English patterns
+                monitorConversationForAssistance(message.content, message.username);
+            } else {
+                console.log('[AI] Monitoring disabled:', {
+                    aiActive: isAIActive,
+                    autoAssist: autoAssistanceEnabled
+                });
+            }
             break;
             
         case 'user_joined':
@@ -792,6 +1357,15 @@ function handleMessageSubmit(event) {
     const content = messageInput.value.trim();
     
     console.log('Message input value:', content);
+    
+    // Check for AI command
+    if (content.toLowerCase().startsWith('/ai')) {
+        console.log('🤖 AI command detected');
+        handleAICommand(content);
+        messageInput.value = '';
+        return;
+    }
+    
     console.log('Socket state:', socket ? socket.readyState : 'null');
     
     if (content && socket && socket.readyState === WebSocket.OPEN) {
@@ -863,15 +1437,37 @@ function setupEventListeners() {
         console.log('[CHAT] Private chat button handler attached');
     }
 
+    // AI Toggle button
+    const aiToggle = document.getElementById('ai-toggle');
+    if (aiToggle) {
+        aiToggle.addEventListener('click', () => {
+            console.log('[CHAT] AI toggle clicked');
+            toggleAIAssistant();
+        });
+        console.log('[CHAT] AI toggle handler attached');
+    }
+
     // AI response button
     const aiBtn = document.getElementById('ai-btn');
     if (aiBtn) {
         aiBtn.addEventListener('click', () => {
-            console.log('[CHAT] AI response button clicked');
-            // TODO: Implement AI response functionality
-            alert('AI response feature coming soon!');
+            console.log('[CHAT] AI button clicked');
+            const input = elements.messageInput;
+            if (input) {
+                const currentText = input.value.trim();
+                if (currentText) {
+                    // User has typed something - send it to AI
+                    console.log('[CHAT] Sending existing text to AI:', currentText);
+                    handleAICommand(`/ai ${currentText}`);
+                    input.value = '';
+                } else {
+                    // No text - prompt user to type
+                    input.value = '/ai ';
+                    input.focus();
+                }
+            }
         });
-        console.log('[CHAT] AI response button handler attached');
+        console.log('[CHAT] AI button handler attached');
     }
     // Logout button
     const logoutBtn = document.getElementById('logout-btn');
@@ -911,6 +1507,31 @@ async function initialize() {
         updateCurrentUserDisplay();
         
         setupEventListeners();
+        
+        // Restore AI assistant state from localStorage
+        const aiEnabled = localStorage.getItem('aiAssistantEnabled') === 'true';
+        if (aiEnabled) {
+            console.log('🤖 Restoring AI assistant state');
+            const toggleBtn = document.getElementById('ai-toggle');
+            const toggleText = toggleBtn?.querySelector('.ai-toggle-text');
+            const listeningIndicator = document.getElementById('ai-listening-indicator');
+            
+            if (toggleBtn && toggleText) {
+                isAIActive = true;
+                isListening = true;
+                toggleBtn.classList.add('active');
+                toggleText.textContent = 'AI On';
+                
+                if (listeningIndicator) {
+                    listeningIndicator.classList.add('active');
+                }
+                
+                // Start passive listening
+                startPassiveListening();
+                console.log('🤖 Passive listening enabled');
+            }
+        }
+        
         await initWebSocket();
         console.log('Chat application initialized successfully');
     } catch (error) {
