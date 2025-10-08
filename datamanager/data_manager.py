@@ -1,12 +1,32 @@
 import datetime
 import json
 from typing import List, Optional, Any
+from contextlib import contextmanager
 
 # Import models from parent directory
 from datamanager.data_model import User, Skill, Training, DataModel, UserSkill, UserPreference
 
 
 class DataManager:
+    @contextmanager
+    def get_session(self):
+        """Context manager for database sessions that ensures proper cleanup.
+        
+        Usage:
+            with self.get_session() as session:
+                user = session.query(User).filter(User.id == user_id).first()
+                return user
+        """
+        session = self.data_model.SessionLocal()
+        try:
+            yield session
+            session.commit()
+        except Exception as e:
+            session.rollback()
+            raise e
+        finally:
+            session.close()
+    
     # User Preference Methods
     
     def get_user_preferences(self, user_id: int, preference_type: str = None) -> dict:
@@ -20,20 +40,20 @@ class DataManager:
         Returns:
             Dictionary of preferences with keys as preference keys and values as preference values
         """
-        session = next(self.data_model.get_db())
-        try:
-            query = session.query(UserPreference).filter(UserPreference.user_id == user_id)
-            if preference_type:
-                query = query.filter(UserPreference.preference_type == preference_type)
-                
-            preferences = query.all()
-            return {
-                f"{pref.preference_type}.{pref.preference_key}": pref.preference_value
-                for pref in preferences
-            }
-        except Exception as e:
-            print(f"Error getting user preferences: {e}")
-            return {}
+        with self.get_session() as session:
+            try:
+                query = session.query(UserPreference).filter(UserPreference.user_id == user_id)
+                if preference_type:
+                    query = query.filter(UserPreference.preference_type == preference_type)
+                    
+                preferences = query.all()
+                return {
+                    f"{pref.preference_type}.{pref.preference_key}": pref.preference_value
+                    for pref in preferences
+                }
+            except Exception as e:
+                print(f"Error getting user preferences: {e}")
+                return {}
     
     def set_user_preference(
         self, 
@@ -56,9 +76,8 @@ class DataManager:
         Returns:
             bool: True if successful, False otherwise
         """
-        session = next(self.data_model.get_db())
-        try:
-            with session.begin():
+        with self.get_session() as session:
+            try:
                 # Check if preference already exists
                 pref = session.query(UserPreference).filter(
                     UserPreference.user_id == user_id,
@@ -83,12 +102,13 @@ class DataManager:
                     )
                     session.add(pref)
                 
+                session.commit()
                 return True
-                
-        except Exception as e:
-            session.rollback()
-            print(f"Error setting user preference: {e}")
-            return False
+                    
+            except Exception as e:
+                session.rollback()
+                print(f"Error setting user preference: {e}")
+                return False
     
     def delete_user_preference(
         self, 
@@ -107,9 +127,8 @@ class DataManager:
         Returns:
             bool: True if any preferences were deleted, False otherwise
         """
-        session = next(self.data_model.get_db())
-        try:
-            with session.begin():
+        with self.get_session() as session:
+            try:
                 query = session.query(UserPreference).filter(
                     UserPreference.user_id == user_id
                 )
@@ -120,12 +139,13 @@ class DataManager:
                     query = query.filter(UserPreference.preference_key == preference_key)
                 
                 deleted_count = query.delete()
+                session.commit()
                 return deleted_count > 0
-                
-        except Exception as e:
-            session.rollback()
-            print(f"Error deleting user preferences: {e}")
-            return False
+                    
+            except Exception as e:
+                session.rollback()
+                print(f"Error deleting user preferences: {e}")
+                return False
 
     def __init__(self, db_path=None):
         """Initialize the DataManager with an optional database path.
@@ -177,12 +197,12 @@ class DataManager:
         Returns:
             User object if found, None otherwise
         """
-        session = next(self.data_model.get_db())
-        try:
-            return session.query(User).filter(User.id == user_id).first()
-        except Exception as e:
-            print(f"Error fetching user: {e}")
-            return None
+        with self.get_session() as session:
+            try:
+                return session.query(User).filter(User.id == user_id).first()
+            except Exception as e:
+                print(f"Error fetching user: {e}")
+                return None
 
     def get_user_by_username(self, username: str) -> Optional[User]:
         """Get a user by their username.
@@ -193,12 +213,12 @@ class DataManager:
         Returns:
             User object if found, None otherwise
         """
-        session = next(self.data_model.get_db())
-        try:
-            return session.query(User).filter(User.username == username).first()
-        except Exception as e:
-            print(f"Error getting user: {e}")
-            return None
+        with self.get_session() as session:
+            try:
+                return session.query(User).filter(User.username == username).first()
+            except Exception as e:
+                print(f"Error getting user: {e}")
+                return None
 
     def update_user(self, user_id: int, **kwargs: dict[str, Any]) -> Optional[User]:
         """Update a user's information.
@@ -445,68 +465,68 @@ class DataManager:
     ) -> Optional[Skill]:
         """Set a skill for a user."""
         skill = self.get_or_create_skill(skill.skill_name)
-        session = next(self.data_model.get_db())
-        existing_user_skill = (
-            session.query(UserSkill)
-            .filter_by(user_id=user_id, skill_id=skill.id)
-            .first()
-        )
-        # Checking if user already set to skill and overwriting db entry if found
-        if existing_user_skill:
+        with self.get_session() as session:
+            existing_user_skill = (
+                session.query(UserSkill)
+                .filter_by(user_id=user_id, skill_id=skill.id)
+                .first()
+            )
+            # Checking if user already set to skill and overwriting db entry if found
+            if existing_user_skill:
+                try:
+                    existing_user_skill.level = level
+                    session.commit()
+                    return skill
+                except Exception as e:
+                    print(f"Error updating skill for user: {e}")
+                    session.rollback()
+                    return None
+            # connecting user to skill
             try:
-                existing_user_skill.level = level
+                new_skill = self.get_or_create_skill(skill.skill_name)
+                session.add(UserSkill(user_id=user_id, skill_id=new_skill.id, level=level))
                 session.commit()
-                return skill
+                return new_skill
             except Exception as e:
-                print(f"Error updating skill for user: {e}")
+                print(f"Error setting skill for user: {e}")
                 session.rollback()
                 return None
-        # connecting user to skill
-        try:
-            new_skill = self.get_or_create_skill(skill.skill_name)
-            session.add(UserSkill(user_id=user_id, skill_id=new_skill.id, level=level))
-            session.commit()
-            return new_skill
-        except Exception as e:
-            print(f"Error setting skill for user: {e}")
-            session.rollback()
-            return None
 
     # In DataManager class:
 
     def get_or_create_skill(self, skill_name: str) -> Optional[Skill]:
-        session = next(self.data_model.get_db())
-        skill = session.query(Skill).filter(Skill.skill_name == skill_name).first()
-        if skill:
-            print("Skill already exists.")
-            return skill
-        else:
-            new_skill = Skill(skill_name=skill_name)
-            try:
-                session.add(new_skill)
-                session.commit()
-                session.refresh(new_skill)
-                return new_skill
-            except Exception as e:
-                print(f"Error creating new skill: {e}")
-                session.rollback()
-                return None
+        with self.get_session() as session:
+            skill = session.query(Skill).filter(Skill.skill_name == skill_name).first()
+            if skill:
+                print("Skill already exists.")
+                return skill
+            else:
+                new_skill = Skill(skill_name=skill_name)
+                try:
+                    session.add(new_skill)
+                    session.commit()
+                    session.refresh(new_skill)
+                    return new_skill
+                except Exception as e:
+                    print(f"Error creating new skill: {e}")
+                    session.rollback()
+                    return None
 
     def link_user_skill(self, user_id: int, skill_id: int, level: int = 0):
-        session = next(self.data_model.get_db())
-        existing = (
-            session.query(UserSkill)
-            .filter_by(user_id=user_id, skill_id=skill_id)
-            .first()
-        )
-        if not existing:
-            userskill = UserSkill(user_id=user_id, skill_id=skill_id, level=level)
-            try:
-                session.add(userskill)
-                session.commit()
-            except Exception as e:
-                print(f"Error adding userskill: {e}")
-                session.rollback()
+        with self.get_session() as session:
+            existing = (
+                session.query(UserSkill)
+                .filter_by(user_id=user_id, skill_id=skill_id)
+                .first()
+            )
+            if not existing:
+                userskill = UserSkill(user_id=user_id, skill_id=skill_id, level=level)
+                try:
+                    session.add(userskill)
+                    session.commit()
+                except Exception as e:
+                    print(f"Error adding userskill: {e}")
+                    session.rollback()
 
     # Training Management Methods
 
