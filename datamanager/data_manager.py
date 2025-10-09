@@ -171,22 +171,22 @@ class DataManager:
         Returns:
             The added User object if successful, None otherwise
         """
-        session = next(self.data_model.get_db())
-        try:
-            # Check if the provided argument matches the expected model
-            if not isinstance(new_user, User):
-                raise ValueError("new_user must be an instance of User")
-            if session.query(User).filter(User.username == new_user.username).first():
-                print(f"User with username {new_user.username} already exists.")
+        with self.get_session() as session:
+            try:
+                # Check if the provided argument matches the expected model
+                if not isinstance(new_user, User):
+                    raise ValueError("new_user must be an instance of User")
+                if session.query(User).filter(User.username == new_user.username).first():
+                    print(f"User with username {new_user.username} already exists.")
+                    return None
+                session.add(new_user)
+                session.commit()
+                session.refresh(new_user)
+                return new_user
+            except Exception as e:
+                print(f"Error adding user: {e}")
+                session.rollback()
                 return None
-            session.add(new_user)
-            session.commit()
-            session.refresh(new_user)
-            return new_user
-        except Exception as e:
-            print(f"Error adding user: {e}")
-            session.rollback()
-            return None
 
     def get_user(self, user_id: int) -> Optional[User]:
         """Get a user by their ID.
@@ -231,23 +231,23 @@ class DataManager:
             Updated User object if successful, None otherwise
             :rtype: Optional[User]
         """
-        session = next(self.data_model.get_db())
-        try:
-            db_user = session.query(User).filter(User.id == user_id).first()
-            if not db_user:
-                print(f"User {user_id} not found.")
+        with self.get_session() as session:
+            try:
+                db_user = session.query(User).filter(User.id == user_id).first()
+                if not db_user:
+                    print(f"User {user_id} not found.")
+                    return None
+
+                for key, value in kwargs.items():
+                    setattr(db_user, key, value)
+
+                session.commit()
+                session.refresh(db_user)
+                return db_user
+            except Exception as e:
+                session.rollback()
+                print(f"Error updating user: {e}")
                 return None
-
-            for key, value in kwargs.items():
-                setattr(db_user, key, value)
-
-            session.commit()
-            session.refresh(db_user)
-            return db_user
-        except Exception as e:
-            session.rollback()
-            print(f"Error updating user: {e}")
-            return None
 
     def delete_user(self, user_id: int) -> bool:
         """Delete a user by ID.
@@ -258,20 +258,20 @@ class DataManager:
         Returns:
             True if successful, False otherwise
         """
-        session = next(self.data_model.get_db())
-        try:
-            db_user = session.query(User).filter(User.id == user_id).first()
-            if not db_user:
-                print(f"User {user_id} not found.")
-                return False
+        with self.get_session() as session:
+            try:
+                db_user = session.query(User).filter(User.id == user_id).first()
+                if not db_user:
+                    print(f"User {user_id} not found.")
+                    return False
 
-            session.delete(db_user)
-            session.commit()
-            return True
-        except Exception as e:
-            session.rollback()
-            print(f"Error deleting user: {e}")
-            return False
+                session.delete(db_user)
+                session.commit()
+                return True
+            except Exception as e:
+                session.rollback()
+                print(f"Error deleting user: {e}")
+                return False
 
     def set_user_temperature(self, user_id: int, temperature: float) -> None:
         """Set a user's temperature.
@@ -281,25 +281,23 @@ class DataManager:
         Returns:
             None
         """
-        session = next(self.data_model.get_db())
-        try:
-            # Use the ORM to update the user's temperature
-            user = session.query(User).filter(User.id == user_id).first()
-            if user:
-                user.temperature = temperature
-                session.commit()
-                print("User temperature set successfully!")
-            else:
-                print(f"User with ID {user_id} not found.")
-        except Exception as e:
-            session.rollback()
-            print(f"Error setting user's temperature: {e}")
+        with self.get_session() as session:
+            try:
+                # Use the ORM to update the user's temperature
+                user = session.query(User).filter(User.id == user_id).first()
+                if user:
+                    user.temperature = temperature
+                    session.commit()
+                    print("User temperature set successfully!")
+                else:
+                    print(f"User with ID {user_id} not found.")
+            except Exception as e:
+                session.rollback()
+                print(f"Error setting user's temperature: {e}")
 
     def save_messages(self, user_id: int, messages: list) -> None:
-        session = next(self.data_model.get_db())
-        try:
-            # Start a new transaction
-            with session.begin():
+        with self.get_session() as session:
+            try:
                 # Get the user with the current session to ensure it's attached
                 user = session.query(User).filter(User.id == user_id).with_for_update().first()
                 if user is None:
@@ -371,15 +369,12 @@ class DataManager:
                 
                 # Add and commit in the same transaction
                 session.add(user)
-
+                session.commit()
                 
-            # Commit happens when the 'with' block exits successfully
-            return None
-
-        except Exception as e:
-            session.rollback()
-            print(f"Error saving user messages: {e}")
-            raise
+            except Exception as e:
+                session.rollback()
+                print(f"Error saving user messages: {e}")
+                raise
 
     # Skills Management Methods
 
@@ -392,21 +387,21 @@ class DataManager:
         Returns:
             The added Skill object if successful, None otherwise
         """
-        session = next(self.data_model.get_db())
-        new_skill = session.query(Skill).filter(Skill.id == skill.id).first()
-        if not new_skill:
-            try:
-                session.add(skill)
-                session.commit()
-                session.refresh(skill)
-                return skill
-            except Exception as e:
-                session.rollback()
-                print(f"Error adding skill: {e}")
+        with self.get_session() as session:
+            new_skill = session.query(Skill).filter(Skill.id == skill.id).first()
+            if not new_skill:
+                try:
+                    session.add(skill)
+                    session.commit()
+                    session.refresh(skill)
+                    return skill
+                except Exception as e:
+                    session.rollback()
+                    print(f"Error adding skill: {e}")
+                    return None
+            else:
+                print(f"Skill with ID {skill.id} already exists.")
                 return None
-        else:
-            print(f"Skill with ID {skill.id} already exists.")
-            return None
 
     def get_skill_ids_for_user(self, user_id: int) -> List[int]:
         """Get all skill ids for a user.
@@ -417,48 +412,48 @@ class DataManager:
         Returns:
             List of Skill objects
         """
-        session = next(self.data_model.get_db())
-        try:
-            skill_ids = (
-                session.query(UserSkill.skill_id)
-                .filter(UserSkill.user_id == user_id)
-                .all()
-            )
-            return [skill_id for (skill_id,) in skill_ids]
-        except Exception as e:
-            print(f"Error getting skills for user: {e}")
-            return []
+        with self.get_session() as session:
+            try:
+                skill_ids = (
+                    session.query(UserSkill.skill_id)
+                    .filter(UserSkill.user_id == user_id)
+                    .all()
+                )
+                return [skill_id for (skill_id,) in skill_ids]
+            except Exception as e:
+                print(f"Error getting skills for user: {e}")
+                return []
 
     def get_skills_for_user(self, user_id: int) -> Optional[List[Skill]]:
         """Get all skills for a user."""
         skill_ids = self.get_skill_ids_for_user(user_id)
         if skill_ids:
-            session = next(self.data_model.get_db())
-            try:
-                skills = [
-                    session.query(Skill).filter(Skill.id == skill_id).first()
-                    for skill_id in skill_ids
-                ]
-                return skills
-            except Exception as e:
-                print(f"Error getting skills for user: {e}")
-                return None
+            with self.get_session() as session:
+                try:
+                    skills = [
+                        session.query(Skill).filter(Skill.id == skill_id).first()
+                        for skill_id in skill_ids
+                    ]
+                    return skills
+                except Exception as e:
+                    print(f"Error getting skills for user: {e}")
+                    return None
         else:
             print("No skills found.")
             return None
 
     def get_skilllevel_for_user(self, user_id: int, skill_id: int) -> Optional[int]:
         """Get skilllevel for a user."""
-        session = next(self.data_model.get_db())
-        skill_level = (
-            session.query(UserSkill.level)
-            .filter(UserSkill.user_id == user_id, UserSkill.skill_id == skill_id)
-            .first()
-        )
-        if skill_level and skill_level[0] is not None:
-            return skill_level[0]  # Return just the level value
-        else:
-            return 0  # Default to 0 if no skill level found
+        with self.get_session() as session:
+            skill_level = (
+                session.query(UserSkill.level)
+                .filter(UserSkill.user_id == user_id, UserSkill.skill_id == skill_id)
+                .first()
+            )
+            if skill_level and skill_level[0] is not None:
+                return skill_level[0]  # Return just the level value
+            else:
+                return 0  # Default to 0 if no skill level found
 
     def set_skill_for_user(
         self, user_id: int, skill: Skill, level=0
@@ -539,17 +534,17 @@ class DataManager:
         Returns:
             The added Training object if successful, None otherwise
         """
-        session = next(self.data_model.get_db())
-        try:
-            session.add(training)
-            session.commit()
-            session.refresh(training)
+        with self.get_session() as session:
+            try:
+                session.add(training)
+                session.commit()
+                session.refresh(training)
 
-            return training
-        except Exception as e:
-            session.rollback()
-            print(f"Error adding training: {e}")
-            return None
+                return training
+            except Exception as e:
+                session.rollback()
+                print(f"Error adding training: {e}")
+                return None
 
     def get_training_for_user(self, user_id: int) -> List[Training]:
         """Get training data for a user.
@@ -560,12 +555,12 @@ class DataManager:
         Returns:
             List of Training objects
         """
-        session = next(self.data_model.get_db())
-        try:
-            return session.query(Training).filter(Training.user_id == user_id).all()
-        except Exception as e:
-            print(f"Error getting training data for user: {e}")
-            return []
+        with self.get_session() as session:
+            try:
+                return session.query(Training).filter(Training.user_id == user_id).all()
+            except Exception as e:
+                print(f"Error getting training data for user: {e}")
+                return []
 
     def get_training_for_skill(self, skill_id: int) -> List[Training]:
         """Get training data for a skill.
@@ -576,12 +571,12 @@ class DataManager:
         Returns:
             List of Training objects
         """
-        session = next(self.data_model.get_db())
-        try:
-            return session.query(Training).filter(Training.skill_id == skill_id).all()
-        except Exception as e:
-            print(f"Error getting training data for skill: {e}")
-            return []
+        with self.get_session() as session:
+            try:
+                return session.query(Training).filter(Training.skill_id == skill_id).all()
+            except Exception as e:
+                print(f"Error getting training data for skill: {e}")
+                return []
 
     def update_training_status(
         self, user_id: int, skill_id: int, new_status: str
@@ -596,23 +591,23 @@ class DataManager:
         Returns:
             Updated Training object if successful, None otherwise
         """
-        session = next(self.data_model.get_db())
-        try:
-            training = (
-                session.query(Training)
-                .filter(Training.user_id == user_id, Training.skill_id == skill_id)
-                .first()
-            )
+        with self.get_session() as session:
+            try:
+                training = (
+                    session.query(Training)
+                    .filter(Training.user_id == user_id, Training.skill_id == skill_id)
+                    .first()
+                )
 
-            if not training:
-                print(f"Training for user {user_id} and skill {skill_id} not found.")
+                if not training:
+                    print(f"Training for user {user_id} and skill {skill_id} not found.")
+                    return None
+
+                setattr(training, "status", new_status)
+                session.commit()
+                session.refresh(training)
+                return training
+            except Exception as e:
+                session.rollback()
+                print(f"Error updating training status: {e}")
                 return None
-
-            setattr(training, "status", new_status)
-            session.commit()
-            session.refresh(training)
-            return training
-        except Exception as e:
-            session.rollback()
-            print(f"Error updating training status: {e}")
-            return None

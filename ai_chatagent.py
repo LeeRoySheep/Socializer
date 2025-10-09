@@ -832,8 +832,9 @@ DO NOT say "Would you like me to..." or "I can help..." - JUST HELP."""
 
 
 clarify_tool = ClarifyCommunicationTool()
+format_tool = FormatTool()
 
-tools = [tavily_search_tool, conversation_recall, skill_evaluator, user_preference_tool, LifeEventTool(dm), clarify_tool]
+tools = [tavily_search_tool, conversation_recall, skill_evaluator, user_preference_tool, LifeEventTool(dm), clarify_tool, format_tool]
 
 memory = InMemorySaver()
 
