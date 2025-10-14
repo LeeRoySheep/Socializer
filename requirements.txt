@@ -27,11 +27,17 @@ pytest-asyncio
 pytest-cov
 pytest-httpx
 
-# AI/ML
+# AI/ML - Core
 openai
 langchain
+langchain-openai
 langchain-tavily
 langgraph
+
+# AI/ML - Optional Providers (install as needed)
+# langchain-google-genai  # For Google Gemini
+# langchain-anthropic     # For Anthropic Claude
+# langchain-community     # For Ollama and other local models
 
 # Utilities
 anyio

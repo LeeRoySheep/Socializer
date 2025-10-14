@@ -44,12 +44,24 @@ except ImportError:
     print("Warning: skill_agents module not found. Some features may be limited.")
     SKILL_AGENTS_AVAILABLE = False
 
+# Import LLM Manager for flexible model switching
+from llm_manager import LLMManager
+from llm_config import LLMSettings
+
 # set API KEYS
 load_dotenv()
 os.environ["OPENAI_API_KEY"] = os.getenv("OPENAI_API_KEY")
 os.environ["TAVILY_API_KEY"] = os.getenv("TAVILY_API_KEY")
 
-llm = init_chat_model("openai:gpt-4o-mini")
+# Initialize LLM using LLM Manager (configured in llm_config.py)
+llm = LLMManager.get_llm(
+    provider=LLMSettings.DEFAULT_PROVIDER,
+    model=LLMSettings.DEFAULT_MODEL,
+    temperature=LLMSettings.DEFAULT_TEMPERATURE,
+    max_tokens=LLMSettings.DEFAULT_MAX_TOKENS
+)
+
+print(f"🤖 LLM initialized: {LLMSettings.DEFAULT_PROVIDER} - {LLMSettings.DEFAULT_MODEL}")
 
 tool_1 = TavilySearch(max_results=10)
 
