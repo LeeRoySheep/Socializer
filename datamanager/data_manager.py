@@ -624,7 +624,8 @@ class DataManager:
         creator_id: int, 
         name: Optional[str] = None,
         room_type: str = "group",
-        ai_enabled: bool = True
+        ai_enabled: bool = True,
+        password: Optional[str] = None
     ) -> Optional[ChatRoom]:
         """
         Create a new chat room.
@@ -634,10 +635,14 @@ class DataManager:
             name (str, optional): Custom room name. Auto-generated if None
             room_type (str): 'direct' (1-on-1), 'group', or 'private'
             ai_enabled (bool): Whether AI should participate in the room
+            password (str, optional): Password for room protection. None = open room
             
         Returns:
             ChatRoom: The created room, or None if error
         """
+        # OBSERVABILITY: Log room creation attempt
+        print(f"[TRACE] create_room: creator_id={creator_id}, name={name}, type={room_type}, ai={ai_enabled}, protected={bool(password)}")
+        
         with self.get_session() as session:
             try:
                 # Create room
@@ -645,7 +650,8 @@ class DataManager:
                     creator_id=creator_id,
                     name=name,
                     room_type=room_type,
-                    ai_enabled=ai_enabled
+                    ai_enabled=ai_enabled,
+                    password=password
                 )
                 session.add(room)
                 session.flush()  # Get room ID
@@ -669,10 +675,13 @@ class DataManager:
                 
                 session.commit()
                 session.refresh(room)
+                # OBSERVABILITY: Log successful creation
+                print(f"[TRACE] create_room success: room_id={room.id}, members={2 if ai_enabled else 1}")
                 return room
             except Exception as e:
                 session.rollback()
-                print(f"Error creating room: {e}")
+                # OBSERVABILITY: Log error with context
+                print(f"[ERROR] create_room exception: creator_id={creator_id}, error={e}")
                 return None
 
     def get_room(self, room_id: int) -> Optional[ChatRoom]:
@@ -776,7 +785,7 @@ class DataManager:
                 print(f"Error creating invite: {e}")
                 return None
 
-    def accept_invite(self, invite_id: int, user_id: int) -> bool:
+    def accept_invite(self, invite_id: int, user_id: int, password: Optional[str] = None) -> bool:
         """
         Accept a room invite.
         Adds user as room member.
@@ -784,16 +793,37 @@ class DataManager:
         Args:
             invite_id (int): Invite ID
             user_id (int): ID of user accepting
+            password (str, optional): Password if room is protected
             
         Returns:
             bool: True if successful, False otherwise
         """
+        # OBSERVABILITY: Log invite acceptance attempt
+        print(f"[TRACE] accept_invite: invite_id={invite_id}, user_id={user_id}, has_password={bool(password)}")
+        
         with self.get_session() as session:
             try:
                 invite = session.query(RoomInvite).filter(RoomInvite.id == invite_id).first()
                 
-                if not invite or invite.invitee_id != user_id or invite.status != 'pending':
+                if not invite:
+                    print(f"[EVAL] accept_invite failed: invite {invite_id} not found")
                     return False
+                    
+                if invite.invitee_id != user_id:
+                    print(f"[EVAL] accept_invite failed: user {user_id} not the invitee (expected {invite.invitee_id})")
+                    return False
+                    
+                if invite.status != 'pending':
+                    print(f"[EVAL] accept_invite failed: invite status is '{invite.status}', expected 'pending'")
+                    return False
+                
+                # Check room password if set
+                room = session.query(ChatRoom).filter(ChatRoom.id == invite.room_id).first()
+                if room and room.password:
+                    if not password or password != room.password:
+                        print(f"[EVAL] accept_invite failed: invalid password for room {room.id}")
+                        return False
+                    print(f"[TRACE] Password validated for room {room.id}")
                 
                 # Update invite status
                 invite.status = 'accepted'
@@ -808,10 +838,13 @@ class DataManager:
                 session.add(member)
                 
                 session.commit()
+                # OBSERVABILITY: Log successful acceptance
+                print(f"[TRACE] accept_invite success: user {user_id} added to room {invite.room_id}")
                 return True
             except Exception as e:
                 session.rollback()
-                print(f"Error accepting invite: {e}")
+                # OBSERVABILITY: Log error with context
+                print(f"[ERROR] accept_invite exception: invite_id={invite_id}, user_id={user_id}, error={e}")
                 return False
 
     def decline_invite(self, invite_id: int, user_id: int) -> bool:

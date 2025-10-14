@@ -27,6 +27,7 @@ class RoomCreate(BaseModel):
     invitees: List[int] = Field(default_factory=list, description="User IDs to invite")
     room_type: str = Field("group", description="Room type: 'direct' or 'group'")
     ai_enabled: bool = Field(True, description="Enable AI in this room")
+    password: Optional[str] = Field(None, description="Optional password for room protection")
 
 
 class RoomResponse(BaseModel):
@@ -39,6 +40,7 @@ class RoomResponse(BaseModel):
     room_type: str
     ai_enabled: bool
     member_count: int
+    has_password: bool = False
     
     class Config:
         from_attributes = True
@@ -81,6 +83,12 @@ class InviteResponse(BaseModel):
     invitee_id: int
     status: str
     created_at: datetime
+    has_password: bool = False
+
+
+class AcceptInviteRequest(BaseModel):
+    """Request model for accepting invite."""
+    password: Optional[str] = Field(None, description="Password if room is protected")
 
 
 # ==========================================
@@ -139,7 +147,8 @@ async def create_room(
         creator_id=current_user.id,
         name=room_data.name,
         room_type=room_data.room_type,
-        ai_enabled=room_data.ai_enabled
+        ai_enabled=room_data.ai_enabled,
+        password=room_data.password
     )
     
     if not room:
@@ -163,7 +172,8 @@ async def create_room(
         is_active=room.is_active,
         room_type=room.room_type,
         ai_enabled=room.ai_enabled,
-        member_count=len(members)
+        member_count=len(members),
+        has_password=bool(room.password)
     )
 
 
@@ -188,7 +198,8 @@ async def get_my_rooms(current_user: User = Depends(get_current_user)):
             is_active=room.is_active,
             room_type=room.room_type,
             ai_enabled=room.ai_enabled,
-            member_count=len(members)
+            member_count=len(members),
+            has_password=bool(room.password)
         ))
     
     return response
@@ -217,7 +228,8 @@ async def get_room(
         is_active=room.is_active,
         room_type=room.room_type,
         ai_enabled=room.ai_enabled,
-        member_count=len(members)
+        member_count=len(members),
+        has_password=bool(room.password)
     )
 
 
@@ -391,7 +403,8 @@ async def get_pending_invites(current_user: User = Depends(get_current_user)):
             inviter_username=inviter.username if inviter else "Unknown",
             invitee_id=invite.invitee_id,
             status=invite.status,
-            created_at=invite.created_at
+            created_at=invite.created_at,
+            has_password=bool(room.password) if room else False
         ))
     
     return response
@@ -400,20 +413,23 @@ async def get_pending_invites(current_user: User = Depends(get_current_user)):
 @router.post("/invites/{invite_id}/accept", status_code=status.HTTP_200_OK)
 async def accept_invite(
     invite_id: int,
+    invite_data: Optional[AcceptInviteRequest] = None,
     current_user: User = Depends(get_current_user)
 ):
     """
     Accept a room invite.
     
+    If room is password-protected, password must be provided.
     User will be added as a member and can start chatting.
     """
     dm = get_dm()
-    success = dm.accept_invite(invite_id, current_user.id)
+    password = invite_data.password if invite_data else None
+    success = dm.accept_invite(invite_id, current_user.id, password)
     
     if not success:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Failed to accept invite. Invite may not exist or already processed."
+            detail="Failed to accept invite. Check password or invite status."
         )
     
     return {"message": "Invite accepted successfully"}
