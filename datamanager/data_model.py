@@ -288,6 +288,149 @@ class Training(Base):
         }
 
 
+class ChatRoom(Base):
+    """
+    Private chat room that can contain multiple users + AI.
+    Supports both 1-on-1 and group conversations.
+    """
+    __tablename__ = "chat_rooms"
+    
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    name: Mapped[Optional[str]] = mapped_column(String, nullable=True)  # Optional custom name
+    creator_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False)
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime, default=datetime.datetime.utcnow, nullable=False
+    )
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    room_type: Mapped[str] = mapped_column(String, default="group", nullable=False)  # 'direct', 'group', 'private'
+    ai_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    
+    # Relationships
+    creator: Mapped["User"] = relationship("User", foreign_keys=[creator_id])
+    members: Mapped[list["RoomMember"]] = relationship(
+        "RoomMember", 
+        back_populates="room",
+        cascade="all, delete-orphan"
+    )
+    messages: Mapped[list["RoomMessage"]] = relationship(
+        "RoomMessage",
+        back_populates="room",
+        cascade="all, delete-orphan",
+        order_by="RoomMessage.created_at"
+    )
+    invites: Mapped[list["RoomInvite"]] = relationship(
+        "RoomInvite",
+        back_populates="room",
+        cascade="all, delete-orphan"
+    )
+    
+    def __repr__(self) -> str:
+        return f"<ChatRoom(id={self.id}, name={self.name}, creator_id={self.creator_id})>"
+    
+    def get_auto_name(self, db_session) -> str:
+        """
+        Generate automatic room name based on members.
+        Returns: "Chat with Alice, Bob" or "Chat with Alice" for 1-on-1
+        """
+        active_members = [m for m in self.members if m.is_active and m.role != 'ai']
+        member_names = []
+        for member in active_members:
+            if member.user_id != self.creator_id:
+                user = db_session.query(User).filter(User.id == member.user_id).first()
+                if user:
+                    member_names.append(user.username)
+        
+        if not member_names:
+            return "Private Room"
+        return f"Chat with {', '.join(member_names)}"
+
+
+class RoomMember(Base):
+    """
+    Association table tracking which users are members of which rooms.
+    """
+    __tablename__ = "room_members"
+    __table_args__ = (
+        UniqueConstraint('room_id', 'user_id', name='_room_user_uc'),
+    )
+    
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    room_id: Mapped[int] = mapped_column(Integer, ForeignKey("chat_rooms.id"), nullable=False)
+    user_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("users.id"), nullable=True)  # NULL for AI
+    joined_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime, default=datetime.datetime.utcnow, nullable=False
+    )
+    role: Mapped[str] = mapped_column(String, default="member", nullable=False)  # 'creator', 'member', 'ai'
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    last_read_at: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime, nullable=True)
+    
+    # Relationships
+    room: Mapped["ChatRoom"] = relationship("ChatRoom", back_populates="members")
+    user: Mapped[Optional["User"]] = relationship("User", foreign_keys=[user_id])
+    
+    def __repr__(self) -> str:
+        return f"<RoomMember(room_id={self.room_id}, user_id={self.user_id}, role={self.role})>"
+
+
+class RoomMessage(Base):
+    """
+    Messages sent in private chat rooms.
+    """
+    __tablename__ = "room_messages"
+    
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    room_id: Mapped[int] = mapped_column(Integer, ForeignKey("chat_rooms.id"), nullable=False)
+    sender_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("users.id"), nullable=True)  # NULL for AI
+    sender_type: Mapped[str] = mapped_column(String, default="user", nullable=False)  # 'user', 'ai', 'system'
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    message_type: Mapped[str] = mapped_column(String, default="text", nullable=False)  # 'text', 'invite', 'system'
+    message_metadata: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)  # For invite buttons, etc.
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime, default=datetime.datetime.utcnow, nullable=False, index=True
+    )
+    edited_at: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime, nullable=True)
+    is_deleted: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    
+    # Relationships
+    room: Mapped["ChatRoom"] = relationship("ChatRoom", back_populates="messages")
+    sender: Mapped[Optional["User"]] = relationship("User", foreign_keys=[sender_id])
+    
+    def __repr__(self) -> str:
+        return f"<RoomMessage(id={self.id}, room_id={self.room_id}, sender_type={self.sender_type})>"
+
+
+class RoomInvite(Base):
+    """
+    Invitations to join private chat rooms.
+    Appears as a message in the invitee's main chat.
+    """
+    __tablename__ = "room_invites"
+    __table_args__ = (
+        UniqueConstraint('room_id', 'invitee_id', name='_room_invitee_uc'),
+    )
+    
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    room_id: Mapped[int] = mapped_column(Integer, ForeignKey("chat_rooms.id"), nullable=False)
+    inviter_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False)
+    invitee_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False)
+    status: Mapped[str] = mapped_column(String, default="pending", nullable=False)  # 'pending', 'accepted', 'declined'
+    message_id: Mapped[Optional[int]] = mapped_column(
+        Integer, ForeignKey("room_messages.id"), nullable=True
+    )  # Reference to invite message shown in main chat
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime, default=datetime.datetime.utcnow, nullable=False
+    )
+    responded_at: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime, nullable=True)
+    
+    # Relationships
+    room: Mapped["ChatRoom"] = relationship("ChatRoom", back_populates="invites")
+    inviter: Mapped["User"] = relationship("User", foreign_keys=[inviter_id])
+    invitee: Mapped["User"] = relationship("User", foreign_keys=[invitee_id])
+    
+    def __repr__(self) -> str:
+        return f"<RoomInvite(id={self.id}, room_id={self.room_id}, invitee_id={self.invitee_id}, status={self.status})>"
+
+
 class DataModel:
     """
     Database management class for the application.

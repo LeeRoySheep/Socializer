@@ -4,7 +4,10 @@ from typing import List, Optional, Any
 from contextlib import contextmanager
 
 # Import models from parent directory
-from datamanager.data_model import User, Skill, Training, DataModel, UserSkill, UserPreference
+from datamanager.data_model import (
+    User, Skill, Training, DataModel, UserSkill, UserPreference,
+    ChatRoom, RoomMember, RoomMessage, RoomInvite
+)
 
 
 class DataManager:
@@ -611,3 +614,422 @@ class DataManager:
                 session.rollback()
                 print(f"Error updating training status: {e}")
                 return None
+
+    # ==========================================
+    # PRIVATE CHAT ROOM METHODS
+    # ==========================================
+
+    def create_room(
+        self, 
+        creator_id: int, 
+        name: Optional[str] = None,
+        room_type: str = "group",
+        ai_enabled: bool = True
+    ) -> Optional[ChatRoom]:
+        """
+        Create a new chat room.
+        
+        Args:
+            creator_id (int): ID of the user creating the room
+            name (str, optional): Custom room name. Auto-generated if None
+            room_type (str): 'direct' (1-on-1), 'group', or 'private'
+            ai_enabled (bool): Whether AI should participate in the room
+            
+        Returns:
+            ChatRoom: The created room, or None if error
+        """
+        with self.get_session() as session:
+            try:
+                # Create room
+                room = ChatRoom(
+                    creator_id=creator_id,
+                    name=name,
+                    room_type=room_type,
+                    ai_enabled=ai_enabled
+                )
+                session.add(room)
+                session.flush()  # Get room ID
+                
+                # Add creator as member
+                creator_member = RoomMember(
+                    room_id=room.id,
+                    user_id=creator_id,
+                    role='creator'
+                )
+                session.add(creator_member)
+                
+                # Add AI as member if enabled
+                if ai_enabled:
+                    ai_member = RoomMember(
+                        room_id=room.id,
+                        user_id=None,  # AI has no user_id
+                        role='ai'
+                    )
+                    session.add(ai_member)
+                
+                session.commit()
+                session.refresh(room)
+                return room
+            except Exception as e:
+                session.rollback()
+                print(f"Error creating room: {e}")
+                return None
+
+    def get_room(self, room_id: int) -> Optional[ChatRoom]:
+        """
+        Get a room by ID.
+        
+        Args:
+            room_id (int): Room ID
+            
+        Returns:
+            ChatRoom: The room, or None if not found
+        """
+        with self.get_session() as session:
+            try:
+                return session.query(ChatRoom).filter(ChatRoom.id == room_id).first()
+            except Exception as e:
+                print(f"Error getting room: {e}")
+                return None
+
+    def get_user_rooms(self, user_id: int) -> List[ChatRoom]:
+        """
+        Get all rooms where user is a member.
+        
+        Args:
+            user_id (int): User ID
+            
+        Returns:
+            List[ChatRoom]: List of rooms
+        """
+        with self.get_session() as session:
+            try:
+                rooms = (
+                    session.query(ChatRoom)
+                    .join(RoomMember)
+                    .filter(
+                        RoomMember.user_id == user_id,
+                        RoomMember.is_active == True,
+                        ChatRoom.is_active == True
+                    )
+                    .order_by(ChatRoom.created_at.desc())
+                    .all()
+                )
+                return rooms
+            except Exception as e:
+                print(f"Error getting user rooms: {e}")
+                return []
+
+    def invite_user_to_room(
+        self, 
+        room_id: int, 
+        inviter_id: int, 
+        invitee_id: int
+    ) -> Optional[RoomInvite]:
+        """
+        Invite a user to a room.
+        Creates invite record and message in invitee's main chat.
+        
+        Args:
+            room_id (int): Room ID
+            inviter_id (int): ID of user sending invite
+            invitee_id (int): ID of user being invited
+            
+        Returns:
+            RoomInvite: The created invite, or None if error
+        """
+        with self.get_session() as session:
+            try:
+                # Get room and inviter info
+                room = session.query(ChatRoom).filter(ChatRoom.id == room_id).first()
+                inviter = session.query(User).filter(User.id == inviter_id).first()
+                
+                if not room or not inviter:
+                    return None
+                
+                # Check if invite already exists
+                existing = (
+                    session.query(RoomInvite)
+                    .filter(
+                        RoomInvite.room_id == room_id,
+                        RoomInvite.invitee_id == invitee_id,
+                        RoomInvite.status == 'pending'
+                    )
+                    .first()
+                )
+                if existing:
+                    return existing
+                
+                # Create invite
+                invite = RoomInvite(
+                    room_id=room_id,
+                    inviter_id=inviter_id,
+                    invitee_id=invitee_id,
+                    status='pending'
+                )
+                session.add(invite)
+                session.commit()
+                session.refresh(invite)
+                return invite
+            except Exception as e:
+                session.rollback()
+                print(f"Error creating invite: {e}")
+                return None
+
+    def accept_invite(self, invite_id: int, user_id: int) -> bool:
+        """
+        Accept a room invite.
+        Adds user as room member.
+        
+        Args:
+            invite_id (int): Invite ID
+            user_id (int): ID of user accepting
+            
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        with self.get_session() as session:
+            try:
+                invite = session.query(RoomInvite).filter(RoomInvite.id == invite_id).first()
+                
+                if not invite or invite.invitee_id != user_id or invite.status != 'pending':
+                    return False
+                
+                # Update invite status
+                invite.status = 'accepted'
+                invite.responded_at = datetime.datetime.utcnow()
+                
+                # Add user as room member
+                member = RoomMember(
+                    room_id=invite.room_id,
+                    user_id=user_id,
+                    role='member'
+                )
+                session.add(member)
+                
+                session.commit()
+                return True
+            except Exception as e:
+                session.rollback()
+                print(f"Error accepting invite: {e}")
+                return False
+
+    def decline_invite(self, invite_id: int, user_id: int) -> bool:
+        """
+        Decline a room invite.
+        
+        Args:
+            invite_id (int): Invite ID
+            user_id (int): ID of user declining
+            
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        with self.get_session() as session:
+            try:
+                invite = session.query(RoomInvite).filter(RoomInvite.id == invite_id).first()
+                
+                if not invite or invite.invitee_id != user_id or invite.status != 'pending':
+                    return False
+                
+                invite.status = 'declined'
+                invite.responded_at = datetime.datetime.utcnow()
+                
+                session.commit()
+                return True
+            except Exception as e:
+                session.rollback()
+                print(f"Error declining invite: {e}")
+                return False
+
+    def add_room_message(
+        self,
+        room_id: int,
+        sender_id: Optional[int],
+        content: str,
+        sender_type: str = "user",
+        message_type: str = "text",
+        message_metadata: Optional[dict] = None
+    ) -> Optional[RoomMessage]:
+        """
+        Add a message to a room.
+        
+        Args:
+            room_id (int): Room ID
+            sender_id (int, optional): User ID of sender (None for AI)
+            content (str): Message content
+            sender_type (str): 'user', 'ai', or 'system'
+            message_type (str): 'text', 'invite', 'system'
+            message_metadata (dict, optional): Additional data
+            
+        Returns:
+            RoomMessage: The created message, or None if error
+        """
+        with self.get_session() as session:
+            try:
+                message = RoomMessage(
+                    room_id=room_id,
+                    sender_id=sender_id,
+                    content=content,
+                    sender_type=sender_type,
+                    message_type=message_type,
+                    message_metadata=message_metadata or {}
+                )
+                session.add(message)
+                session.commit()
+                session.refresh(message)
+                return message
+            except Exception as e:
+                session.rollback()
+                print(f"Error adding room message: {e}")
+                return None
+
+    def get_room_messages(
+        self, 
+        room_id: int, 
+        limit: int = 50,
+        before_id: Optional[int] = None
+    ) -> List[RoomMessage]:
+        """
+        Get messages from a room.
+        
+        Args:
+            room_id (int): Room ID
+            limit (int): Maximum number of messages to return
+            before_id (int, optional): Get messages before this message ID (for pagination)
+            
+        Returns:
+            List[RoomMessage]: List of messages
+        """
+        with self.get_session() as session:
+            try:
+                query = (
+                    session.query(RoomMessage)
+                    .filter(
+                        RoomMessage.room_id == room_id,
+                        RoomMessage.is_deleted == False
+                    )
+                )
+                
+                if before_id:
+                    query = query.filter(RoomMessage.id < before_id)
+                
+                messages = (
+                    query
+                    .order_by(RoomMessage.created_at.desc())
+                    .limit(limit)
+                    .all()
+                )
+                return list(reversed(messages))  # Return in chronological order
+            except Exception as e:
+                print(f"Error getting room messages: {e}")
+                return []
+
+    def get_room_members(self, room_id: int) -> List[RoomMember]:
+        """
+        Get all active members of a room.
+        
+        Args:
+            room_id (int): Room ID
+            
+        Returns:
+            List[RoomMember]: List of room members
+        """
+        with self.get_session() as session:
+            try:
+                return (
+                    session.query(RoomMember)
+                    .filter(
+                        RoomMember.room_id == room_id,
+                        RoomMember.is_active == True
+                    )
+                    .all()
+                )
+            except Exception as e:
+                print(f"Error getting room members: {e}")
+                return []
+
+    def is_user_in_room(self, user_id: int, room_id: int) -> bool:
+        """
+        Check if user is a member of a room.
+        
+        Args:
+            user_id (int): User ID
+            room_id (int): Room ID
+            
+        Returns:
+            bool: True if user is member, False otherwise
+        """
+        with self.get_session() as session:
+            try:
+                member = (
+                    session.query(RoomMember)
+                    .filter(
+                        RoomMember.user_id == user_id,
+                        RoomMember.room_id == room_id,
+                        RoomMember.is_active == True
+                    )
+                    .first()
+                )
+                return member is not None
+            except Exception as e:
+                print(f"Error checking room membership: {e}")
+                return False
+
+    def leave_room(self, user_id: int, room_id: int) -> bool:
+        """
+        User leaves a room.
+        
+        Args:
+            user_id (int): User ID
+            room_id (int): Room ID
+            
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        with self.get_session() as session:
+            try:
+                member = (
+                    session.query(RoomMember)
+                    .filter(
+                        RoomMember.user_id == user_id,
+                        RoomMember.room_id == room_id
+                    )
+                    .first()
+                )
+                
+                if not member:
+                    return False
+                
+                member.is_active = False
+                session.commit()
+                return True
+            except Exception as e:
+                session.rollback()
+                print(f"Error leaving room: {e}")
+                return False
+
+    def get_pending_invites(self, user_id: int) -> List[RoomInvite]:
+        """
+        Get all pending invites for a user.
+        
+        Args:
+            user_id (int): User ID
+            
+        Returns:
+            List[RoomInvite]: List of pending invites
+        """
+        with self.get_session() as session:
+            try:
+                return (
+                    session.query(RoomInvite)
+                    .filter(
+                        RoomInvite.invitee_id == user_id,
+                        RoomInvite.status == 'pending'
+                    )
+                    .order_by(RoomInvite.created_at.desc())
+                    .all()
+                )
+            except Exception as e:
+                print(f"Error getting pending invites: {e}")
+                return []

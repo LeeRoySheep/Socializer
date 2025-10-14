@@ -232,6 +232,10 @@ app.include_router(websocket_router, prefix="/ws")
 # Include test runner router
 app.include_router(test_runner.router, prefix="/tests")
 
+# Include rooms router for private chat
+from app.routers import rooms
+app.include_router(rooms.router)
+
 # WebSocket manager is already imported at the top
 # Initialize WebSocket manager with database session
 def get_connection_manager() -> ConnectionManager:
