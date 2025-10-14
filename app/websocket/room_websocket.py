@@ -290,8 +290,49 @@ async def handle_room_websocket(
                             "timestamp": saved_message.created_at.isoformat()
                         })
                         
-                        # TODO: Trigger AI response if ai_enabled
-                        # This will be done in Phase A.4
+                        # Trigger AI response if ai_enabled
+                        room = dm.get_room(room_id)
+                        if room and room.ai_enabled:
+                            # Import AI service
+                            from app.services.room_ai_service import get_room_ai_service
+                            ai_service = get_room_ai_service()
+                            
+                            # Get recent messages for context
+                            recent_messages = dm.get_room_messages(room_id, limit=20)
+                            
+                            # Check if AI should respond
+                            should_respond = await ai_service.should_ai_respond(
+                                room, recent_messages, saved_message
+                            )
+                            
+                            if should_respond:
+                                # Generate AI response
+                                ai_response = await ai_service.generate_room_response(
+                                    room, current_user, content, recent_messages
+                                )
+                                
+                                if ai_response:
+                                    # Save AI message
+                                    ai_message = dm.add_room_message(
+                                        room_id=room_id,
+                                        sender_id=None,  # AI has no sender_id
+                                        content=ai_response,
+                                        sender_type="ai",
+                                        message_type="text"
+                                    )
+                                    
+                                    if ai_message:
+                                        # Broadcast AI response
+                                        await room_manager.broadcast_to_room(room_id, {
+                                            "type": "message",
+                                            "message_id": ai_message.id,
+                                            "room_id": room_id,
+                                            "sender_id": None,
+                                            "sender_username": "AI Assistant",
+                                            "sender_type": "ai",
+                                            "content": ai_response,
+                                            "timestamp": ai_message.created_at.isoformat()
+                                        })
             
             elif message_type == "typing":
                 # User is typing
