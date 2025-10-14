@@ -548,3 +548,81 @@ async def send_online_users(
             await manager.send_personal_message(json.dumps(error_response), websocket)
         except Exception as send_error:
             logger.error(f"Failed to send error response: {send_error}")
+
+
+# ==========================================
+# PRIVATE ROOM WEBSOCKET
+# ==========================================
+
+from app.websocket.room_websocket import handle_room_websocket, room_manager
+from datamanager.data_manager import DataManager
+
+@router.websocket("/rooms/{room_id}")
+async def websocket_room_endpoint(
+    websocket: WebSocket,
+    room_id: int
+):
+    """
+    WebSocket endpoint for private room messaging.
+    
+    Connect to a room for real-time messaging:
+    ws://localhost:8000/ws/rooms/123?token=YOUR_JWT_TOKEN
+    
+    Args:
+        room_id: ID of the room to connect to
+        token: JWT token (query parameter)
+    """
+    # Get token from query params
+    token = websocket.query_params.get("token")
+    
+    logger.info(f"WebSocket connection attempt to room {room_id}")
+    logger.info(f"Token present: {bool(token)}")
+    
+    if not token:
+        logger.error("No token provided")
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+        return
+    
+    # Authenticate user
+    try:
+        from app.auth import SECRET_KEY, ALGORITHM
+        from jose import JWTError
+        
+        # Decode JWT token
+        try:
+            logger.info(f"Decoding token with key: {SECRET_KEY[:10]}...")
+            payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+            user_id = payload.get("sub")
+            logger.info(f"Token decoded successfully, user: {user_id}")
+            
+            if not user_id:
+                logger.error("No user_id in token")
+                await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+                return
+        except JWTError as e:
+            logger.error(f"JWT decode error: {e}")
+            await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+            return
+        
+        # Get user from database
+        dm = DataManager("data.sqlite.db")
+        from datamanager.data_model import User
+        
+        # user_id from token is actually the username
+        user = dm.get_user_by_username(user_id)
+        
+        if not user:
+            logger.error(f"User {user_id} not found")
+            await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+            return
+        
+        logger.info(f"User authenticated: {user.username} (ID: {user.id})")
+        
+        # Handle the WebSocket connection
+        await handle_room_websocket(websocket, room_id, user)
+        
+    except Exception as e:
+        logger.error(f"Error in room WebSocket: {e}")
+        import traceback
+        traceback.print_exc()
+        await websocket.close(code=status.WS_1011_INTERNAL_ERROR)
