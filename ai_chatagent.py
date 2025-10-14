@@ -17,6 +17,9 @@ from pydantic import BaseModel, Field, field_validator
 from response_formatter import ResponseFormatter
 from format_tool import FormatTool
 
+# Import extracted tools
+from tools.conversation_recall_tool import ConversationRecallTool
+
 # Add the project root to the Python path
 project_root = str(Path(__file__).resolve().parent.parent)
 if project_root not in sys.path:
@@ -70,109 +73,7 @@ from pydantic import BaseModel, Field, field_validator
 from typing import Type
 
 
-class ConversationRecallInput(BaseModel):
-    user_id: int = Field(
-        ..., description="The ID of the user whose conversation to retrieve"
-    )
-
-
-class ConversationRecallTool(BaseTool):
-    """Tool to recall the last conversation from memory."""
-
-    name: str = "recall_last_conversation"
-    description: str = """Use this tool to recall the last conversation from memory. 
-    Use this when the user asks about previous conversations or context.
-    Input should be a user_id."""
-    args_schema: Type[BaseModel] = ConversationRecallInput
-    dm: DataManager = None
-
-    def __init__(self, data_manager):
-        super().__init__()
-        self.dm = data_manager
-
-    def _run(self, *args, **kwargs) -> str:
-        """
-        Retrieve the last conversation for a user.
-        This method is called by LangChain's tool system.
-        """
-        # Handle both direct call and tool call formats
-        if args and isinstance(args[0], dict):
-            # Called with a single dict argument (from tool call)
-            user_id = args[0].get("user_id")
-        elif "user_id" in kwargs:
-            # Called with user_id keyword argument
-            user_id = kwargs["user_id"]
-        elif args:
-            # Called with user_id as a positional argument
-            user_id = args[0]
-        else:
-            return json.dumps({"status": "error", "message": "user_id is required"})
-
-        if not user_id:
-            return json.dumps({"status": "error", "message": "user_id is required"})
-
-        # Call the actual implementation
-        return self._get_conversation(user_id)
-
-    def invoke(self, *args, **kwargs) -> str:
-        """
-        Method called by LangChain's tool system.
-        This is just a wrapper around _run to maintain compatibility.
-        """
-        return self._run(*args, **kwargs)
-
-    def _get_conversation(self, user_id: int) -> str:
-        """
-        Actual implementation of conversation retrieval.
-        Returns a JSON string with the conversation data.
-        """
-        try:
-            user = self.dm.get_user(user_id)
-            if not user or not user.messages or user.messages == "[]":
-                return json.dumps(
-                    {
-                        "status": "success",
-                        "message": "No previous conversation found",
-                        "data": [],
-                    }
-                )
-
-            # Parse the messages if they're stored as a JSON string
-            try:
-                if isinstance(user.messages, str):
-                    messages = json.loads(user.messages)
-                else:
-                    messages = user.messages
-
-                if not isinstance(messages, list):
-                    messages = []
-
-                # Return the last 5 messages to keep context manageable
-                return json.dumps(
-                    {
-                        "status": "success",
-                        "message": "Conversation retrieved successfully",
-                        "data": messages[-5:],
-                        "total_messages": len(messages),
-                    }
-                )
-
-            except json.JSONDecodeError as e:
-                return json.dumps(
-                    {
-                        "status": "error",
-                        "message": f"Failed to parse conversation: {str(e)}",
-                        "data": [],
-                    }
-                )
-
-        except Exception as e:
-            return json.dumps(
-                {
-                    "status": "error",
-                    "message": f"Failed to retrieve conversation: {str(e)}",
-                }
-            )
+# ConversationRecallTool has been extracted to tools/conversation_recall_tool.py
 
 
 class UserPreferenceTool(BaseTool):
