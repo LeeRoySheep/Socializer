@@ -77,20 +77,33 @@ from typing import Type
 
 
 class UserPreferenceTool(BaseTool):
-    """Tool for managing user preferences."""
+    """Tool for managing user preferences with encryption for sensitive data."""
     
     name: str = "user_preference"
     description: str = (
-        "Manage user preferences. "
+        "Manage user preferences (ENCRYPTED). "
         "Use this tool to get, set, or delete user preferences. "
+        "Personal data (name, DOB, sensitive info) is automatically encrypted. "
         "Input should be a JSON object with 'action' (get/set/delete), 'user_id' (int), "
         "and other relevant fields based on the action."
     )
     dm: DataManager = None
+    encryptor: Optional[Any] = None  # Properly declare for Pydantic
     
     def __init__(self, data_manager: DataManager):
         super().__init__()
         self.dm = data_manager
+        
+        # Initialize encryption for sensitive data
+        try:
+            from app.security.encryption import get_encryptor
+            self.encryptor = get_encryptor()
+        except ImportError:
+            print("⚠️  WARNING: Encryption module not available, data will be stored unencrypted!")
+            self.encryptor = None
+        except Exception as e:
+            print(f"⚠️  WARNING: Could not initialize encryption: {e}")
+            self.encryptor = None
     
     def _run(self, *args, **kwargs) -> dict:
         """Execute the preference tool.
@@ -119,10 +132,45 @@ class UserPreferenceTool(BaseTool):
         try:
             if action == "get":
                 preference_type = kwargs.get("preference_type")
-                preferences = self.dm.get_user_preferences(user_id, preference_type)
+                preferences_dict = self.dm.get_user_preferences(user_id, preference_type)
+                
+                # ✅ DECRYPT sensitive preferences before returning
+                # preferences_dict format: {"type.key": "value"}
+                decrypted_prefs = []
+                
+                if preferences_dict:
+                    for full_key, value in preferences_dict.items():
+                        # Split "personal_info.favorite_color" -> ["personal_info", "favorite_color"]
+                        if '.' in full_key:
+                            pref_type, pref_key = full_key.split('.', 1)
+                        else:
+                            pref_type = "general"
+                            pref_key = full_key
+                        
+                        # Decrypt if it's sensitive data and encrypted
+                        decrypted_value = value
+                        is_encrypted = False
+                        
+                        if self.encryptor and self._is_sensitive_type(pref_type):
+                            if value and self.encryptor.is_encrypted(value):
+                                try:
+                                    decrypted_value = self.encryptor.decrypt(value)
+                                    is_encrypted = True
+                                except Exception as e:
+                                    print(f"Decryption error for {full_key}: {e}")
+                        
+                        decrypted_prefs.append({
+                            "preference_type": pref_type,
+                            "preference_key": pref_key,
+                            "preference_value": decrypted_value,
+                            "encrypted": is_encrypted
+                        })
+                
                 return {
                     "status": "success",
-                    "preferences": preferences
+                    "preferences": decrypted_prefs,
+                    "total": len(decrypted_prefs),
+                    "encryption_enabled": bool(self.encryptor)
                 }
                 
             elif action == "set":
@@ -133,18 +181,32 @@ class UserPreferenceTool(BaseTool):
                         "message": f"Missing required fields. Required: {', '.join(required)}"
                     }
                 
+                # ✅ ENCRYPT sensitive data before storing
+                preference_value = kwargs["preference_value"]
+                preference_type = kwargs["preference_type"]
+                
+                if self.encryptor and self._is_sensitive_type(preference_type):
+                    try:
+                        preference_value = self.encryptor.encrypt(preference_value)
+                    except Exception as e:
+                        return {
+                            "status": "error",
+                            "message": f"Encryption failed: {str(e)}"
+                        }
+                
                 success = self.dm.set_user_preference(
                     user_id=user_id,
-                    preference_type=kwargs["preference_type"],
+                    preference_type=preference_type,
                     preference_key=kwargs["preference_key"],
-                    preference_value=kwargs["preference_value"],
+                    preference_value=preference_value,
                     confidence=kwargs.get("confidence", 1.0)
                 )
                 
                 if success:
                     return {
                         "status": "success",
-                        "message": "Preference set successfully"
+                        "message": "Preference set successfully (encrypted)" if self.encryptor and self._is_sensitive_type(preference_type) else "Preference set successfully",
+                        "encrypted": bool(self.encryptor and self._is_sensitive_type(preference_type))
                     }
                 else:
                     return {
@@ -189,6 +251,26 @@ class UserPreferenceTool(BaseTool):
                 "status": "error",
                 "message": f"Error in UserPreferenceTool: {str(e)}"
             }
+    
+    def _is_sensitive_type(self, preference_type: str) -> bool:
+        """
+        Determine if a preference type contains sensitive data that should be encrypted.
+        
+        Args:
+            preference_type: The type of preference
+            
+        Returns:
+            bool: True if sensitive data requiring encryption
+        """
+        sensitive_types = {
+            'personal_info',    # Name, DOB, address, etc.
+            'contact',          # Email, phone, etc.
+            'financial',        # Payment info
+            'medical',          # Health data
+            'identification',   # ID numbers, SSN, etc.
+            'private'           # Explicitly private data
+        }
+        return preference_type.lower() in sensitive_types
     
     async def _arun(self, *args, **kwargs):
         """Async version of run."""
@@ -253,15 +335,17 @@ class SkillEvaluator(BaseTool):
             stop_evaluation_orchestrator()
 
     def _run(self, *args, **kwargs) -> Dict[str, Any]:
-        """Run the skill evaluator tool using the multi-agent system.
+        """Run the skill evaluator tool using the multi-agent system with web research.
 
         Args:
             user_id: The ID of the user to evaluate
             message: The message to evaluate for skills (optional if messages is provided)
             messages: List of messages to evaluate (optional if message is provided)
+            cultural_context: User's cultural background (optional)
+            use_web_research: Whether to fetch latest empathy research (default: True)
 
         Returns:
-            Dict containing skill scores and suggestions
+            Dict containing skill scores, suggestions, and latest research
         """
         try:
             # Handle both direct kwargs and nested input dict
@@ -271,6 +355,8 @@ class SkillEvaluator(BaseTool):
             user_id = kwargs.get('user_id')
             message = kwargs.get('message')
             messages = kwargs.get('messages', [message] if message else [])
+            cultural_context = kwargs.get('cultural_context', 'Western')
+            use_web_research = kwargs.get('use_web_research', True)
             
             if not user_id:
                 return {"status": "error", "message": "User ID is required"}
@@ -278,15 +364,34 @@ class SkillEvaluator(BaseTool):
             if not messages:
                 return {"status": "error", "message": "No message or messages provided"}
             
+            # ✅ NEW: Get latest empathy research from web
+            latest_standards = None
+            if use_web_research:
+                try:
+                    # Search for latest empathy and social skills research
+                    research_query = f"latest {cultural_context} empathy social skills research 2024 2025"
+                    research_result = tool_1.invoke(research_query)
+                    latest_standards = {
+                        "query": research_query,
+                        "research": str(research_result)[:500],  # Limit to 500 chars
+                        "updated": "2025-10-15"
+                    }
+                except Exception as e:
+                    print(f"Web research failed: {e}")
+            
             # Get current skill levels
             current_skills = self.get_skill_suggestions(user_id)
             
-            # For now, just return the current skills
-            # In a real implementation, you would analyze the messages and update skills
+            # Analyze message for skill demonstration
+            analysis = self._analyze_message_skills(message if isinstance(message, str) else str(messages), cultural_context)
+            
             return {
                 "status": "success",
-                "message": "Skill evaluation completed",
-                "current_skills": current_skills
+                "message": "Skill evaluation completed with latest research",
+                "current_skills": current_skills,
+                "message_analysis": analysis,
+                "latest_standards": latest_standards,
+                "cultural_context": cultural_context
             }
             
         except Exception as e:
@@ -295,6 +400,36 @@ class SkillEvaluator(BaseTool):
                 "message": f"An error occurred while evaluating skills: {str(e)}",
                 "current_skills": self.get_skill_suggestions(user_id) if 'user_id' in locals() else []
             }
+    
+    def _analyze_message_skills(self, message: str, cultural_context: str = "Western") -> Dict[str, Any]:
+        """Analyze a message for social skill demonstration.
+        
+        Args:
+            message: The message to analyze
+            cultural_context: Cultural context for evaluation
+            
+        Returns:
+            Analysis results with detected skills
+        """
+        message_lower = message.lower()
+        detected_skills = []
+        
+        for skill_name, data in self.skills.items():
+            keywords = data.get('keywords', [])
+            if any(keyword.lower() in message_lower for keyword in keywords):
+                detected_skills.append({
+                    "skill": skill_name,
+                    "detected": True,
+                    "keywords_found": [kw for kw in keywords if kw.lower() in message_lower]
+                })
+        
+        return {
+            "message_length": len(message),
+            "detected_skills": detected_skills,
+            "skill_count": len(detected_skills),
+            "cultural_context": cultural_context,
+            "needs_improvement": len(detected_skills) < 2  # Less than 2 skills detected
+        }
     
     def get_skill_suggestions(self, user_id: int) -> List[Dict[str, Any]]:
         """Get the current skills and suggestions for a user.
@@ -897,6 +1032,8 @@ class AiChatagent:
         self.tavily_search = TavilySearchTool(search_tool=tool_1)
         self.conversation_tool = ConversationRecallTool(dm)
         self.skill_evaluator_tool = SkillEvaluator(dm)
+        self.user_preference_tool = UserPreferenceTool(dm)
+        self.clarify_tool = ClarifyCommunicationTool()
         
         # Initialize tools configuration for LLM
         self.tools = [
@@ -962,6 +1099,59 @@ class AiChatagent:
                     "required": ["data"],
                 },
             },
+            {
+                "name": "user_preference",
+                "description": "Save and retrieve personal user data like name, DOB, interests, skills, preferences. Use this to remember important information about the user.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "action": {
+                            "type": "string",
+                            "description": "Action to perform: 'get', 'set', or 'delete'",
+                            "enum": ["get", "set", "delete"],
+                        },
+                        "user_id": {
+                            "type": "integer",
+                            "description": "The user ID",
+                        },
+                        "preference_type": {
+                            "type": "string",
+                            "description": "Category: 'personal_info', 'interests', 'skills', 'preferences'",
+                        },
+                        "preference_key": {
+                            "type": "string",
+                            "description": "Specific key: 'name', 'dob', 'favorite_topic', etc.",
+                        },
+                        "preference_value": {
+                            "type": "string",
+                            "description": "Value to set",
+                        },
+                    },
+                    "required": ["action", "user_id"],
+                },
+            },
+            {
+                "name": "clarify_communication",
+                "description": "Translate foreign languages and clarify misunderstandings between users. Use this when detecting communication barriers, cultural differences, or language issues.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "text": {
+                            "type": "string",
+                            "description": "The text to translate/clarify",
+                        },
+                        "source_language": {
+                            "type": "string",
+                            "description": "Source language (optional, auto-detect)",
+                        },
+                        "target_language": {
+                            "type": "string",
+                            "description": "Target language (default: English)",
+                        },
+                    },
+                    "required": ["text"],
+                },
+            },
         ]
         
         # Initialize LifeEventTool if DataManager is available
@@ -975,6 +1165,8 @@ class AiChatagent:
             "tavily_search": self.tavily_search,
             "recall_last_conversation": self.conversation_tool,
             "skill_evaluator": self.skill_evaluator_tool,
+            "user_preference": self.user_preference_tool,
+            "clarify_communication": self.clarify_tool,
             "life_event": self.life_event_tool if self.life_event_tool else None,
             "format_output": self.format_tool
         }
@@ -1024,30 +1216,98 @@ class AiChatagent:
             last_message = messages[-1]
             print(f"Last message type: {type(last_message).__name__}")
             
-            # Check for tool call loops (same EXACT tool called multiple times with same args)
-            if len(messages) >= 4:
-                last_four = messages[-4:]
+            # ✅ ENHANCED: Check for tool call loops (same tool called 2+ times)
+            if len(messages) >= 3:
+                # Collect ALL tool calls from recent messages
                 tool_calls_history = []
-                for msg in last_four:
+                for msg in messages[-6:]:  # Check last 6 messages instead of 4
                     if hasattr(msg, 'tool_calls') and msg.tool_calls:
                         for tc in msg.tool_calls:
                             tool_name = tc.get('name') if isinstance(tc, dict) else getattr(tc, 'name', '')
                             tool_args = tc.get('args') if isinstance(tc, dict) else getattr(tc, 'args', {})
                             tool_calls_history.append((tool_name, str(tool_args)))
                 
-                # Only trigger if we have the EXACT SAME tool call 3+ times
-                if len(tool_calls_history) >= 3:
-                    if tool_calls_history[-1] == tool_calls_history[-2] == tool_calls_history[-3]:
-                        print(f"Detected tool call loop for {tool_calls_history[-1][0]}, breaking...")
-                        return {"messages": [{"role": "assistant", 
-                                          "content": "I'm having trouble with that request. Let me try a different approach or please rephrase your question."}]}
+                # ✅ Trigger if SAME tool call appears 2+ times (more aggressive)
+                if len(tool_calls_history) >= 2:
+                    # Count occurrences of each unique call
+                    call_counts = {}
+                    for call in tool_calls_history:
+                        call_counts[call] = call_counts.get(call, 0) + 1
+                    
+                    # If any call appears 2+ times, stop the loop
+                    for call, count in call_counts.items():
+                        if count >= 2:
+                            tool_name = call[0]
+                            print(f"⚠️  Detected tool loop: {tool_name} called {count} times with same args, breaking...")
+                            return {"messages": [{"role": "assistant", 
+                                              "content": f"I've already searched for that information. Based on the results I found, let me provide you with the answer."}]}
             
-            # If last message is an AIMessage with tool_calls, return it for routing
+            # If last message is an AIMessage with tool_calls, check if already executed
             if hasattr(last_message, 'tool_calls') and last_message.tool_calls:
-                print("\n=== TOOL CALLS DETECTED - RETURNING TO GRAPH ===")
+                print("\n" + "="*70)
+                print("🔍 STEP 1: TOOL CALL DETECTION")
+                print("="*70)
+                print(f"📍 Current message index: {len(messages)}")
+                print(f"📍 Total messages in state: {len(messages)}")
+                
+                # ✅ DEBUG: Show all messages in conversation
+                print(f"\n📋 MESSAGE HISTORY:")
+                for i, msg in enumerate(messages):
+                    msg_type = type(msg).__name__
+                    has_tools = hasattr(msg, 'tool_calls') and msg.tool_calls
+                    print(f"   [{i}] {msg_type} | Has tool_calls: {has_tools}")
+                    if has_tools:
+                        for tc in msg.tool_calls:
+                            tc_name = tc.get('name') if isinstance(tc, dict) else getattr(tc, 'name', '?')
+                            tc_args = tc.get('args') if isinstance(tc, dict) else getattr(tc, 'args', {})
+                            print(f"       → Tool: {tc_name}({tc_args})")
+                
+                print(f"\n" + "="*70)
+                print("🔍 STEP 2: COLLECTING PREVIOUS TOOL CALLS")
+                print("="*70)
+                
+                # ✅ Collect all previous tool calls (name + args) from this conversation
+                previous_calls = set()
+                for i, msg in enumerate(messages[:-1]):  # All messages except the current one
+                    if hasattr(msg, 'tool_calls') and msg.tool_calls:
+                        for prev_tc in msg.tool_calls:
+                            prev_name = prev_tc.get('name') if isinstance(prev_tc, dict) else getattr(prev_tc, 'name', '')
+                            prev_args = prev_tc.get('args') if isinstance(prev_tc, dict) else getattr(prev_tc, 'args', {})
+                            call_signature = (prev_name, str(prev_args))
+                            previous_calls.add(call_signature)
+                            print(f"   [Msg {i}] Previous call: {prev_name}({prev_args})")
+                
+                print(f"\n📊 Total unique previous calls: {len(previous_calls)}")
+                
+                print(f"\n" + "="*70)
+                print("🔍 STEP 3: CHECKING CURRENT TOOL CALL FOR DUPLICATES")
+                print("="*70)
+                
+                # Check if current tool calls are duplicates
                 for tool_call in last_message.tool_calls:
                     tool_name = tool_call.get('name') if isinstance(tool_call, dict) else getattr(tool_call, 'name', 'unknown')
-                    print(f"   Tool: {tool_name}")
+                    tool_args = tool_call.get('args') if isinstance(tool_call, dict) else getattr(tool_call, 'args', {})
+                    
+                    print(f"\n   🎯 Current tool call: {tool_name}({tool_args})")
+                    
+                    # Check if this exact tool+args was already called
+                    current_call = (tool_name, str(tool_args))
+                    print(f"   🔎 Signature: {current_call}")
+                    print(f"   🔎 In previous calls? {current_call in previous_calls}")
+                    
+                    if current_call in previous_calls:
+                        print(f"\n   ⚠️  ⚠️  ⚠️  DUPLICATE DETECTED! ⚠️  ⚠️  ⚠️")
+                        print(f"   🛑 Tool {tool_name} already called with same args")
+                        print(f"   🛑 BLOCKING duplicate call")
+                        print(f"   ✅ Will use previous results instead")
+                        print("="*70 + "\n")
+                        return {"messages": [{"role": "assistant", 
+                                          "content": f"I've already searched for that information. Based on the results I found earlier, let me provide you with the answer."}]}
+                
+                print(f"\n   ✅ NO DUPLICATES FOUND - This is a NEW tool call")
+                print(f"\n" + "="*70)
+                print("✅ STEP 4: APPROVING NEW TOOL CALL FOR EXECUTION")
+                print("="*70 + "\n")
                 return {"messages": [last_message]}
             
             # If last message is a ToolMessage, we need to process its result
@@ -1131,6 +1391,14 @@ When user asks about:
 - Provide personalized feedback based on their skill level
 - Celebrate improvements specific to THIS user
 - Track communication patterns for THIS user only
+
+🚫 **CRITICAL: NEVER REPEAT TOOL CALLS**
+⚠️  IMPORTANT RULE: If you've already called a tool in this conversation, DO NOT call it again with the same arguments!
+- Check the conversation history for tool results before making a call
+- If you see a tool result, USE IT - don't request the same information again
+- Example: If you already searched for "Paris weather" and got results, use those results instead of searching again
+- Repeating tool calls wastes resources and slows down responses
+- ALWAYS use existing tool results from the conversation when available
 
 1. SOCIAL BEHAVIOR TRAINING (Priority: HIGH)
    - Guide users toward polite, respectful communication (please, thank you, constructive feedback)
@@ -1284,9 +1552,42 @@ When user asks about:
             print(f"LLM response type: {type(response).__name__}")
             print(f"LLM response: {response}")
             
-            # If the response is a tool call, check if it's a repeat
-            # If LLM generated tool calls, return to graph for tool execution
+            # ✅ CRITICAL FIX: Check for duplicate tool calls BEFORE returning
             if hasattr(response, 'tool_calls') and response.tool_calls:
+                print(f"\n" + "="*70)
+                print(f"🔍 DUPLICATE CHECK: LLM wants to call tools")
+                print("="*70)
+                
+                # Collect all previous tool calls from conversation
+                previous_calls = set()
+                for msg in messages:
+                    if hasattr(msg, 'tool_calls') and msg.tool_calls:
+                        for prev_tc in msg.tool_calls:
+                            prev_name = prev_tc.get('name') if isinstance(prev_tc, dict) else getattr(prev_tc, 'name', '')
+                            prev_args = prev_tc.get('args') if isinstance(prev_tc, dict) else getattr(prev_tc, 'args', {})
+                            previous_calls.add((prev_name, str(prev_args)))
+                
+                print(f"📊 Found {len(previous_calls)} previous tool calls in conversation")
+                
+                # Check each requested tool call
+                for tool_call in response.tool_calls:
+                    tool_name = tool_call.get('name') if isinstance(tool_call, dict) else getattr(tool_call, 'name', 'unknown')
+                    tool_args = tool_call.get('args') if isinstance(tool_call, dict) else getattr(tool_call, 'args', {})
+                    current_call = (tool_name, str(tool_args))
+                    
+                    print(f"🎯 LLM wants: {tool_name}({tool_args})")
+                    print(f"   Is duplicate? {current_call in previous_calls}")
+                    
+                    if current_call in previous_calls:
+                        print(f"\n⚠️  ⚠️  ⚠️  DUPLICATE BLOCKED! ⚠️  ⚠️  ⚠️")
+                        print(f"🛑 {tool_name} already called with same args - using previous results")
+                        print("="*70 + "\n")
+                        # Return a message telling LLM to use existing results
+                        return {"messages": [{"role": "assistant", 
+                                          "content": "I've already retrieved that information in a previous search. Based on those results, let me provide you with the answer."}]}
+                
+                print(f"✅ No duplicates - approving tool execution")
+                print("="*70)
                 print(f"\n=== LLM GENERATED TOOL CALLS - RETURNING TO GRAPH ===")
                 for tool_call in response.tool_calls:
                     tool_name = tool_call.get('name') if isinstance(tool_call, dict) else getattr(tool_call, 'name', 'unknown')

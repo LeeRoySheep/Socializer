@@ -178,20 +178,24 @@ async def get_current_user(
     
     try:
         if token in TOKEN_BLACKLIST:
+            print(f"⚠️  Token is blacklisted")
             raise credentials_exception
             
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         username: str = payload.get("sub")
         if username is None:
+            print(f"⚠️  No username in token payload")
             raise credentials_exception
         
         user = get_user(db, username=username)
         if user is None:
+            print(f"⚠️  User '{username}' not found in database")
             raise credentials_exception
             
         return user
         
-    except JWTError:
+    except JWTError as e:
+        print(f"⚠️  JWT validation error: {e}")
         raise credentials_exception
 
 async def get_current_active_user(
