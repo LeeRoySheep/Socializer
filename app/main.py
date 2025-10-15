@@ -238,6 +238,10 @@ app.include_router(chat.router, prefix="/api/chat", tags=["Chat API"])
 from app.routers import rooms
 app.include_router(rooms.router, prefix="/api/rooms", tags=["Private Rooms"])
 
+# Include AI/LLM router for AI agent testing and integration
+from app.routers import ai
+app.include_router(ai.router, tags=["AI/LLM"])
+
 # Note: Auth endpoints are defined directly in main.py at /api/auth/
 # (lines ~1345, ~1505) to support both JSON API and HTML form submissions
 

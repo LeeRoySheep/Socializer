@@ -30,6 +30,8 @@ from datamanager.data_manager import DataManager
 from datamanager.data_model import User, Training, UserSkill
 from datamanager.life_event_manager import LifeEventManager, LifeEventModel
 from app.config import SQLALCHEMY_DATABASE_URL
+from app.ote_logger import get_logger, create_metrics
+import time
 
 # Initialize the database manager
 db_path = SQLALCHEMY_DATABASE_URL.replace('sqlite:///', '')
@@ -1016,6 +1018,11 @@ class AiChatagent:
         self.user = user
         self.preferences = user.preferences or {}
         self.temperature = user.temperature or 0.7
+        
+        # ✅ Initialize O-T-E Logger for observability
+        self.ote_logger = get_logger()
+        self.request_start_time = None
+        self.current_request_id = None
         self.skills = dm.get_skills_for_user(user.id) or {}
         self.training = dm.get_training_for_user(user.id) or {}
         self.user_profile = {
@@ -1204,8 +1211,23 @@ class AiChatagent:
         Returns:
             dict: A dictionary with a single 'messages' key containing the AI's response
         """
+        # ✅ O-T-E: Start request tracing
+        self.current_request_id = self.ote_logger.generate_request_id()
+        self.request_start_time = time.time()
+        
         try:
             print("\n=== CHATBOT METHOD START ===")
+            
+            # ✅ O-T-E: Log request start
+            self.ote_logger.logger.info(
+                f"🚀 Chat request started",
+                extra={
+                    'request_id': self.current_request_id,
+                    'user_id': self.user.id,
+                    'event_type': 'request_start'
+                }
+            )
+            
             # Validate input state
             if not state or "messages" not in state or not state["messages"]:
                 print("ERROR: Invalid or empty message state")
@@ -1548,9 +1570,24 @@ When user asks about:
             print(f"LLM tools: {[t.get('name') if isinstance(t, dict) else getattr(t, 'name', str(t)) for t in self.tools]}")
             print(f"Tool instances: {list(self.tool_instances.keys())}")
             
+            # ✅ O-T-E: Track LLM call timing
+            llm_start = time.time()
             response = self.llm_with_tools.invoke(messages_for_llm)
+            llm_duration = (time.time() - llm_start) * 1000  # ms
+            
             print(f"LLM response type: {type(response).__name__}")
             print(f"LLM response: {response}")
+            
+            # ✅ O-T-E: Log LLM call metrics
+            if hasattr(response, 'usage_metadata'):
+                usage = response.usage_metadata
+                self.ote_logger.log_llm_call(
+                    request_id=self.current_request_id,
+                    model=getattr(response, 'model', 'gpt-4o-mini'),
+                    prompt_tokens=usage.get('input_tokens', 0),
+                    completion_tokens=usage.get('output_tokens', 0),
+                    duration_ms=llm_duration
+                )
             
             # ✅ CRITICAL FIX: Check for duplicate tool calls BEFORE returning
             if hasattr(response, 'tool_calls') and response.tool_calls:
@@ -1582,6 +1619,14 @@ When user asks about:
                         print(f"\n⚠️  ⚠️  ⚠️  DUPLICATE BLOCKED! ⚠️  ⚠️  ⚠️")
                         print(f"🛑 {tool_name} already called with same args - using previous results")
                         print("="*70 + "\n")
+                        
+                        # ✅ O-T-E: Log duplicate block
+                        self.ote_logger.log_duplicate_block(
+                            request_id=self.current_request_id,
+                            tool_name=tool_name,
+                            tool_args=tool_args
+                        )
+                        
                         # Return a message telling LLM to use existing results
                         return {"messages": [{"role": "assistant", 
                                           "content": "I've already retrieved that information in a previous search. Based on those results, let me provide you with the answer."}]}
