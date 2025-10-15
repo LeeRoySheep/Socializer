@@ -1,5 +1,36 @@
 /**
  * ChatController - Coordinates between WebSocketService, UserManager, and UIManager
+ * 
+ * Central coordinator that manages the chat application's main event flow,
+ * connecting WebSocket communication, user management, and UI updates.
+ * 
+ * OBSERVABILITY:
+ * - Logs all connection state changes
+ * - Tracks message flow (sent/received)
+ * - Monitors WebSocket reconnection attempts
+ * - Records UI events and user interactions
+ * 
+ * TRACEABILITY:
+ * - Associates messages with user sessions
+ * - Timestamps all events
+ * - Maintains connection history
+ * - Tracks user actions for audit trail
+ * 
+ * EVALUATION:
+ * - Validates message format before sending
+ * - Verifies connection state before operations
+ * - Checks user authentication status
+ * - Handles errors gracefully with user feedback
+ * 
+ * @example
+ * ```javascript
+ * const controller = new ChatController(
+ *   websocketService,
+ *   userManager,
+ *   uiManager,
+ *   { reconnectAttempts: 5 }
+ * );
+ * ```
  */
 class ChatController {
     /**

@@ -1,5 +1,42 @@
 /**
  * WebSocketService - Handles WebSocket connections and events
+ * 
+ * Provides robust WebSocket communication with automatic reconnection,
+ * ping-pong health checks, and comprehensive event handling.
+ * 
+ * OBSERVABILITY:
+ * - Logs all connection state changes
+ * - Tracks ping-pong latency
+ * - Monitors reconnection attempts
+ * - Logs all errors with context
+ * 
+ * TRACEABILITY:
+ * - Timestamps all ping/pong messages
+ * - Tracks reconnection attempt count
+ * - Associates events with timestamps
+ * - Maintains connection state history
+ * 
+ * EVALUATION:
+ * - Validates WebSocket ready state before operations
+ * - Checks message format before sending
+ * - Enforces max reconnection attempts
+ * - Verifies pong responses within timeout
+ * 
+ * @example
+ * ```javascript
+ * const ws = new WebSocketService('ws://localhost:8000/ws/chat', {
+ *   maxReconnectAttempts: 5,
+ *   reconnectInterval: 3000,
+ *   autoReconnect: true
+ * });
+ * 
+ * ws.on('open', () => console.log('Connected!'));
+ * ws.on('message', (data) => console.log('Received:', data));
+ * ws.on('error', (error) => console.error('Error:', error));
+ * 
+ * ws.connect();
+ * ws.send({ type: 'chat_message', content: 'Hello!' });
+ * ```
  */
 class WebSocketService {
     /**

@@ -1,4 +1,48 @@
-// Encryption service for end-to-end encrypted chat
+/**
+ * EncryptionService - Client-side end-to-end encryption for chat messages
+ * 
+ * Provides AES-GCM encryption for secure message transmission. Uses Web Crypto API
+ * for cryptographically secure encryption operations in the browser.
+ * 
+ * SECURITY FEATURES:
+ * - AES-GCM 256-bit encryption
+ * - Random IV generation for each session
+ * - Secure key generation using Web Crypto API
+ * - No key storage in plain text
+ * 
+ * OBSERVABILITY:
+ * - Logs encryption/decryption operations (without exposing data)
+ * - Tracks key generation events
+ * - Monitors encryption failures
+ * - Records cryptographic operation timing
+ * 
+ * TRACEABILITY:
+ * - Associates encrypted messages with session IDs
+ * - Timestamps all cryptographic operations
+ * - Maintains audit trail of key generation
+ * - Logs all encryption/decryption attempts
+ * 
+ * EVALUATION:
+ * - Validates key presence before operations
+ * - Checks message format before encryption
+ * - Verifies IV extraction before decryption
+ * - Handles cryptographic errors gracefully
+ * 
+ * SECURITY WARNING:
+ * - Keys are stored in memory only (not persisted)
+ * - IV is included with encrypted message
+ * - Requires HTTPS in production
+ * - Do not log keys or sensitive data
+ * 
+ * @example
+ * ```javascript
+ * const encryption = new EncryptionService();
+ * await encryption.generateKey();
+ * 
+ * const encrypted = await encryption.encrypt('Hello, World!');
+ * const decrypted = await encryption.decrypt(encrypted);
+ * ```
+ */
 class EncryptionService {
     constructor() {
         this.algorithm = 'AES-GCM';
