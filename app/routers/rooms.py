@@ -28,6 +28,7 @@ class RoomCreate(BaseModel):
     room_type: str = Field("group", description="Room type: 'direct' or 'group'")
     ai_enabled: bool = Field(True, description="Enable AI in this room")
     password: Optional[str] = Field(None, description="Optional password for room protection")
+    is_public: bool = Field(False, description="False = hidden (invite-only), True = discoverable")
 
 
 class RoomResponse(BaseModel):
@@ -41,6 +42,7 @@ class RoomResponse(BaseModel):
     ai_enabled: bool
     member_count: int
     has_password: bool = False
+    is_public: bool = False
     
     class Config:
         from_attributes = True
@@ -157,7 +159,8 @@ async def create_room(
         name=room_data.name,
         room_type=room_data.room_type,
         ai_enabled=True,  # ALWAYS TRUE - AI is mandatory for moderation
-        password=room_data.password
+        password=room_data.password,
+        is_public=room_data.is_public
     )
     
     if not room:
@@ -182,7 +185,8 @@ async def create_room(
         room_type=room.room_type,
         ai_enabled=room.ai_enabled,
         member_count=len(members),
-        has_password=bool(room.password)
+        has_password=bool(room.password),
+        is_public=room.is_public
     )
 
 
@@ -208,7 +212,8 @@ async def get_my_rooms(current_user: User = Depends(get_current_user)):
             room_type=room.room_type,
             ai_enabled=room.ai_enabled,
             member_count=len(members),
-            has_password=bool(room.password)
+            has_password=bool(room.password),
+            is_public=room.is_public
         ))
     
     return response
@@ -238,7 +243,8 @@ async def get_room(
         room_type=room.room_type,
         ai_enabled=room.ai_enabled,
         member_count=len(members),
-        has_password=bool(room.password)
+        has_password=bool(room.password),
+        is_public=room.is_public
     )
 
 

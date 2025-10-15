@@ -351,28 +351,65 @@ class PrivateRoomsManager {
         div.className = 'room-item';
         div.dataset.roomId = room.id;
 
-        // Determine icon based on room properties
-        let icon = '💬';
-        if (room.password) icon = '🔒';
-        if (room.ai_enabled) icon = '🤖';
+        // Determine icon based on room properties (priority order)
+        let icon = '💬';  // Default
+        
+        // Priority 1: AI enabled (most common, all rooms)
+        if (room.ai_enabled) {
+            icon = '🤖';
+        }
+        
+        // Priority 2: Password protection (security feature)
+        if (room.has_password) {
+            icon = '🔒';
+        }
+        
+        // Priority 3: Visibility (only show if PUBLIC, since hidden is default)
+        if (room.is_public) {
+            icon = '👁️';  // Public/discoverable room
+        }
+        
+        // OBSERVABILITY: Log room visibility
+        console.log('[TRACE] createRoomElement:', {
+            room_id: room.id,
+            name: room.name,
+            is_public: room.is_public,
+            icon: icon
+        });
+
+        // Check if current user is creator
+        const currentUserId = window.currentUser?.id;
+        const isCreator = room.creator_id === currentUserId;
 
         div.innerHTML = `
             <div class="room-icon">${icon}</div>
             <div class="room-details">
-                <div class="room-name">${this.escapeHtml(room.name)}</div>
+                <div class="room-name">${this.escapeHtml(room.name || 'Unnamed Room')}</div>
                 <div class="room-info">
                     <span><i class="bi bi-people"></i> ${room.member_count || 0}</span>
-                    ${room.password ? '<span><i class="bi bi-lock"></i></span>' : ''}
-                    ${room.ai_enabled ? '<span><i class="bi bi-robot"></i></span>' : ''}
+                    ${room.has_password ? '<span title="Password protected"><i class="bi bi-lock"></i></span>' : ''}
+                    ${room.is_public ? '<span title="Public (discoverable)"><i class="bi bi-eye"></i></span>' : '<span title="Hidden (invite-only)"><i class="bi bi-eye-slash"></i></span>'}
+                    ${room.ai_enabled ? '<span title="AI monitoring active"><i class="bi bi-robot"></i></span>' : ''}
                 </div>
             </div>
+            ${isCreator ? '<button class="btn btn-sm btn-danger delete-room-btn" data-room-id="' + room.id + '" title="Delete room"><i class="bi bi-trash"></i></button>' : ''}
         `;
 
-        // Click handler
-        div.addEventListener('click', () => {
+        // Click handler for room selection
+        const roomDetails = div.querySelector('.room-details');
+        roomDetails.addEventListener('click', () => {
             console.log('[TRACE] Room selected:', { room_id: room.id, name: room.name });
             this.selectRoom(room);
         });
+
+        // Delete button handler (if creator)
+        if (isCreator) {
+            const deleteBtn = div.querySelector('.delete-room-btn');
+            deleteBtn.addEventListener('click', async (e) => {
+                e.stopPropagation();  // Don't trigger room selection
+                await this.deleteRoom(room.id, room.name);
+            });
+        }
 
         return div;
     }
@@ -484,6 +521,7 @@ class PrivateRoomsManager {
             const hasPassword = document.getElementById('room-password-toggle').checked;
             const password = hasPassword ? document.getElementById('room-password').value : null;
             const aiEnabled = true; // AI is always enabled for moderation
+            const isPublic = document.getElementById('room-public-toggle').checked;
             const inviteUserIds = Array.from(this.elements.roomInvitesSelect.selectedOptions).map(opt => parseInt(opt.value));
 
             // Validation
@@ -497,6 +535,7 @@ class PrivateRoomsManager {
                 name: roomName,
                 has_password: hasPassword,
                 ai_enabled: aiEnabled,
+                is_public: isPublic,
                 invites_count: inviteUserIds.length
             });
 
@@ -515,7 +554,9 @@ class PrivateRoomsManager {
                 body: JSON.stringify({
                     name: roomName,
                     password: password,
-                    ai_enabled: aiEnabled
+                    ai_enabled: aiEnabled,
+                    is_public: isPublic,
+                    invitees: inviteUserIds
                 })
             });
 
@@ -576,6 +617,57 @@ class PrivateRoomsManager {
             console.log('[TRACE] sendInvites: success');
         } catch (error) {
             console.error('[ERROR] sendInvites failed:', error);
+        }
+    }
+
+    /**
+     * Delete a room (creator only)
+     * 
+     * OBSERVABILITY: Logs deletion attempts
+     * TRACEABILITY: Tracks room_id
+     * EVALUATION: Confirms deletion with user
+     */
+    async deleteRoom(roomId, roomName) {
+        console.log('[TRACE] deleteRoom:', { room_id: roomId, name: roomName });
+        
+        // EVALUATION: Confirm deletion
+        const confirmed = confirm(`Are you sure you want to delete "${roomName}"?\n\nThis will remove the room for all members. This action cannot be undone.`);
+        if (!confirmed) {
+            console.log('[EVAL] deleteRoom: cancelled by user');
+            return;
+        }
+        
+        try {
+            const token = this.getToken();
+            const response = await fetch(`${this.apiBaseUrl}/${roomId}`, {
+                method: 'DELETE',
+                headers: {
+                    'Authorization': `Bearer ${token}`
+                }
+            });
+            
+            if (!response.ok) {
+                const error = await response.json();
+                throw new Error(error.detail || 'Failed to delete room');
+            }
+            
+            console.log('[TRACE] deleteRoom: success');
+            this.showSuccess('Room deleted successfully');
+            
+            // Reload rooms list
+            await this.loadRooms();
+            
+            // If deleted room was active, clear selection
+            if (this.activeRoomId === roomId) {
+                this.activeRoomId = null;
+                if (this.elements.backToMainBtn) {
+                    this.elements.backToMainBtn.style.display = 'none';
+                }
+            }
+            
+        } catch (error) {
+            console.error('[ERROR] deleteRoom failed:', error);
+            this.showError(error.message || 'Failed to delete room');
         }
     }
 

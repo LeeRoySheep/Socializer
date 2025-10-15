@@ -172,6 +172,30 @@
     color: rgba(255, 255, 255, 0.8);
 }
 
+/* Delete Room Button */
+.delete-room-btn {
+    opacity: 0;
+    transition: all 0.2s;
+    padding: 0.25rem 0.5rem;
+    font-size: 0.85rem;
+    margin-left: auto;
+    flex-shrink: 0;
+}
+
+.room-item:hover .delete-room-btn {
+    opacity: 1;
+}
+
+.delete-room-btn:hover {
+    background: #dc3545 !important;
+    border-color: #dc3545 !important;
+    transform: scale(1.1);
+}
+
+.delete-room-btn:active {
+    transform: scale(0.95);
+}
+
 /* Room Chat Area */
 .room-chat-area {
     display: flex;

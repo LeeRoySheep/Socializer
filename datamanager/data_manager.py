@@ -625,7 +625,8 @@ class DataManager:
         name: Optional[str] = None,
         room_type: str = "group",
         ai_enabled: bool = True,
-        password: Optional[str] = None
+        password: Optional[str] = None,
+        is_public: bool = False
     ) -> Optional[ChatRoom]:
         """
         Create a new chat room.
@@ -636,12 +637,18 @@ class DataManager:
             room_type (str): 'direct' (1-on-1), 'group', or 'private'
             ai_enabled (bool): Whether AI should participate in the room
             password (str, optional): Password for room protection. None = open room
+            is_public (bool): False = hidden (invite-only), True = discoverable by others
             
         Returns:
             ChatRoom: The created room, or None if error
+            
+        Notes:
+            - Hidden rooms (is_public=False) are not discoverable, invite-only
+            - Public rooms (is_public=True) can be discovered/searched by others
+            - AI is ALWAYS enabled for monitoring empathy and misunderstandings
         """
         # OBSERVABILITY: Log room creation attempt
-        print(f"[TRACE] create_room: creator_id={creator_id}, name={name}, type={room_type}, ai={ai_enabled}, protected={bool(password)}")
+        print(f"[TRACE] create_room: creator_id={creator_id}, name={name}, type={room_type}, ai={ai_enabled}, protected={bool(password)}, public={is_public}")
         
         with self.get_session() as session:
             try:
@@ -651,7 +658,8 @@ class DataManager:
                     name=name,
                     room_type=room_type,
                     ai_enabled=ai_enabled,
-                    password=password
+                    password=password,
+                    is_public=is_public
                 )
                 session.add(room)
                 session.flush()  # Get room ID

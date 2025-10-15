@@ -305,6 +305,7 @@ class ChatRoom(Base):
     room_type: Mapped[str] = mapped_column(String, default="group", nullable=False)  # 'direct', 'group', 'private'
     ai_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     password: Mapped[Optional[str]] = mapped_column(String, nullable=True)  # Optional password for room protection
+    is_public: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)  # False = hidden (invite-only), True = discoverable
     
     # Relationships
     creator: Mapped["User"] = relationship("User", foreign_keys=[creator_id])
