@@ -336,7 +336,10 @@ INSTRUCTIONS:
 
 Should you intervene?`;
 
-        const response = await fetch('/api/ai-chat', {
+        // Get selected LLM model from dropdown
+        const selectedModel = window.getCurrentLLMModel ? window.getCurrentLLMModel() : 'gpt-4o-mini';
+        
+        const response = await fetch('/api/ai/chat', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -344,7 +347,8 @@ Should you intervene?`;
             },
             body: JSON.stringify({
                 message: monitoringPrompt,
-                thread_id: `chat-monitor-${currentUser.id}`
+                conversation_id: `chat-monitor-${currentUser.id}`,
+                model: selectedModel
             })
         });
         
@@ -362,7 +366,7 @@ Should you intervene?`;
                 
                 console.log('[AI] 🎬 Calling displayAIMessage...');
                 // Display AI's intervention
-                displayAIMessage(data.response, data.tools_used);
+                displayAIMessage(data.response, data.tools_used, data.metrics);
                 console.log('[AI] 🎬 displayAIMessage call completed');
                 
                 console.log('[AI] 🎬 Calling displaySystemMessage...');
@@ -706,7 +710,11 @@ async function handleAICommand(message) {
     showAITypingIndicator();
     
     try {
-        const response = await fetch('/api/ai-chat', {
+        // Get selected LLM model from dropdown
+        const selectedModel = window.getCurrentLLMModel ? window.getCurrentLLMModel() : 'gpt-4o-mini';
+        console.log('[AI] Using model:', selectedModel);
+        
+        const response = await fetch('/api/ai/chat', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -714,7 +722,8 @@ async function handleAICommand(message) {
             },
             body: JSON.stringify({
                 message: aiPrompt,
-                thread_id: `chat-${currentUser.id}`
+                conversation_id: `chat-${currentUser.id}`,
+                model: selectedModel
             })
         });
         
@@ -722,7 +731,8 @@ async function handleAICommand(message) {
         
         if (response.ok) {
             const data = await response.json();
-            displayAIMessage(data.response, data.tools_used);
+            console.log('[AI] Response data:', data);
+            displayAIMessage(data.response, data.tools_used, data.metrics);
         } else {
             const errorData = await response.json();
             displaySystemMessage(`❌ AI Error: ${errorData.detail || 'Unknown error'}`, 'error-message');
@@ -750,7 +760,7 @@ function displaySystemMessage(text, className = 'system-message') {
     messagesContainer.scrollTop = messagesContainer.scrollHeight;
 }
 
-function displayAIMessage(text, tools = null) {
+function displayAIMessage(text, tools = null, metrics = null) {
     console.log('[AI] 📨 displayAIMessage called with text:', text.substring(0, 100));
     
     const messagesContainer = document.getElementById('messages');
@@ -775,6 +785,7 @@ function displayAIMessage(text, tools = null) {
         contentDiv.innerHTML = `<strong>🤖 AI Assistant:</strong><br>${text}`;
     }
     
+    // Display tools used
     if (tools && tools.length > 0) {
         const toolsInfo = document.createElement('div');
         toolsInfo.style.fontSize = '0.75rem';
@@ -783,6 +794,22 @@ function displayAIMessage(text, tools = null) {
         toolsInfo.innerHTML = `<i class="bi bi-tools"></i> Tools: ${tools.join(', ')}`;
         contentDiv.appendChild(toolsInfo);
         console.log('[AI] ✅ Tools info added');
+    }
+    
+    // Display metrics (optional)
+    if (metrics) {
+        const metricsInfo = document.createElement('div');
+        metricsInfo.style.fontSize = '0.7rem';
+        metricsInfo.style.marginTop = '0.25rem';
+        metricsInfo.style.opacity = '0.6';
+        const parts = [];
+        if (metrics.total_tokens) parts.push(`${metrics.total_tokens} tokens`);
+        if (metrics.cost_usd) parts.push(`$${metrics.cost_usd.toFixed(4)}`);
+        if (parts.length > 0) {
+            metricsInfo.innerHTML = `<i class="bi bi-graph-up"></i> ${parts.join(' • ')}`;
+            contentDiv.appendChild(metricsInfo);
+            console.log('[AI] ✅ Metrics info added');
+        }
     }
     
     messageDiv.appendChild(contentDiv);
