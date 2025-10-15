@@ -720,14 +720,58 @@ async def websocket_endpoint(
     websocket: WebSocket,
     token: str = None
 ):
-    """
-    WebSocket endpoint for real-time chat communication.
+    """WebSocket endpoint for real-time chat communication.
     
-    This endpoint handles the WebSocket connection for the chat interface, including:
-    - Authentication via JWT token
-    - Connection management
-    - Message routing
-    - Error handling and logging
+    Manages bidirectional WebSocket connections for real-time messaging, including
+    authentication, room management, message persistence, and AI integration.
+    
+    Parameters:
+        websocket (WebSocket): FastAPI WebSocket connection instance
+        token (str, optional): JWT authentication token (can also be sent in first message)
+    
+    Returns:
+        None: Maintains open connection until client disconnects or error occurs
+    
+    Raises:
+        WebSocketDisconnect: When client closes connection gracefully
+        json.JSONDecodeError: If received data is not valid JSON
+        HTTPException: For authentication failures
+        Exception: For unexpected errors during message processing
+    
+    Message Flow:
+        1. Accept WebSocket connection
+        2. Receive auth message with JWT token
+        3. Validate user and establish session
+        4. Join default room (general) or specified room
+        5. Process incoming messages (chat, room_join, room_leave, typing)
+        6. Broadcast to room members via ChatManager
+        7. Save messages to database for persistence
+    
+    OBSERVABILITY:
+        - Logs all connection events (connect, disconnect, errors)
+        - Tracks message flow and broadcast success
+        - Records database save operations
+        - Monitors AI response triggers
+    
+    TRACEABILITY:
+        - Associates all messages with user_id and room_id
+        - Timestamps all events (ISO 8601 format)
+        - Maintains client_id for connection tracking
+        - Logs authentication attempts
+    
+    EVALUATION:
+        - Validates JWT token before allowing connection
+        - Verifies message type and content before processing
+        - Checks room membership for private rooms
+        - Enforces message content validation (non-empty, max length)
+        - Password validation for password-protected rooms
+    
+    Example WebSocket Messages:
+        Auth: {"type": "auth", "token": "jwt_token_here", "username": "user123"}
+        Chat: {"type": "chat_message", "content": "Hello world"}
+        Join Room: {"type": "join_room", "room_id": "room_42", "password": "optional"}
+        Leave Room: {"type": "leave_room", "room_id": "room_42"}
+        Typing: {"type": "typing_indicator", "is_typing": true}
     """
     from app.websocket.chat_manager import manager as chat_manager
     from app.websocket.chat_endpoint import get_current_user_websocket
