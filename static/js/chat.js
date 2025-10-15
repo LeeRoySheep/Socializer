@@ -1504,16 +1504,19 @@ async function setupEventListeners() {
             }
             
             // Clear messages and load room history
-            if (elements.messages) {
-                elements.messages.innerHTML = `
+            if (elements.chatMessages) {
+                elements.chatMessages.innerHTML = `
                     <div class="message system-message">
                         <div class="message-content">
                             <i class="bi bi-door-open"></i>
-                            Switched to ${room.name || 'private room'}
+                            Switched to ${room.name || 'private room'}. Loading message history...
                         </div>
                     </div>
                 `;
             }
+            
+            // Load last 10 messages from this room
+            loadRoomMessageHistory(room.id);
         };
         
         console.log('[CHAT] Private rooms manager initialized successfully');
@@ -1558,24 +1561,9 @@ async function setupEventListeners() {
     console.log('[CHAT] Looking for logout button, found:', logoutBtn);
     if (logoutBtn) {
         logoutBtn.addEventListener('click', (e) => {
-            e.preventDefault(); // Prevent any default behavior
+            e.preventDefault();
             console.log('[CHAT] Logout button clicked!');
-            console.log('[CHAT] AuthService:', authService);
-            try {
-                // Close WebSocket connection BEFORE logging out
-                console.log('[CHAT] Closing WebSocket before logout...');
-                closeWebSocket();
-                
-                // Small delay to ensure WebSocket closes properly
-                setTimeout(() => {
-                    authService.logout();
-                    console.log('[CHAT] Logout called successfully');
-                }, 100);
-            } catch (error) {
-                console.error('[CHAT] Error during logout:', error);
-                // Even if error, try to logout
-                authService.logout();
-            }
+            handleLogout();
         });
         console.log('[CHAT] Logout button handler attached');
     } else {
@@ -1625,6 +1613,188 @@ async function initialize() {
         updateConnectionStatus(false, 'Failed to connect');
     }
 }
+
+// Load room message history
+async function loadRoomMessageHistory(roomId) {
+    console.log('🔵 [HISTORY] ========== START LOADING MESSAGE HISTORY ==========');
+    console.log('🔵 [HISTORY] Room ID:', roomId);
+    console.log('🔵 [HISTORY] Current room:', currentRoom);
+    console.log('🔵 [HISTORY] Current user:', currentUser);
+    console.log('🔵 [HISTORY] elements.chatMessages exists:', !!elements.chatMessages);
+    
+    try {
+        // Check all token sources
+        console.log('🔵 [HISTORY] Checking token sources:');
+        console.log('  - window.currentUser?.token:', !!window.currentUser?.token);
+        console.log('  - window.ACCESS_TOKEN:', !!window.ACCESS_TOKEN);
+        console.log('  - localStorage.access_token:', !!localStorage.getItem('access_token'));
+        
+        // Use same token retrieval as PrivateRooms
+        const token = window.currentUser?.token || window.ACCESS_TOKEN || localStorage.getItem('access_token');
+        if (!token) {
+            console.error('🔴 [HISTORY] ERROR: No token found, cannot load messages');
+            console.error('🔴 [HISTORY] Checked all three sources - all returned null/undefined');
+            return;
+        }
+        
+        console.log('🟢 [HISTORY] Token found! Length:', token.length);
+        console.log('🟢 [HISTORY] Token starts with:', token.substring(0, 20) + '...');
+        
+        const url = `/api/rooms/${roomId}/messages?limit=10`;
+        console.log('🔵 [HISTORY] Fetching from URL:', url);
+        console.log('🔵 [HISTORY] About to call fetch...');
+        
+        const response = await fetch(url, {
+            method: 'GET',
+            headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json'
+            }
+        });
+        
+        console.log('🟢 [HISTORY] Fetch completed!');
+        console.log('🟢 [HISTORY] Response status:', response.status);
+        console.log('🟢 [HISTORY] Response ok:', response.ok);
+        
+        if (!response.ok) {
+            const errorText = await response.text();
+            console.error('[ERROR] API error:', { status: response.status, text: errorText });
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+        
+        const messages = await response.json();
+        console.log('[TRACE] Loaded message history:', { count: messages.length, messages });
+        console.log('[TRACE] First message from API:', messages[0]);
+        console.log('[TRACE] Last message from API:', messages[messages.length - 1]);
+        
+        // Don't reverse - API already returns in correct order (oldest first)
+        const messagesReversed = messages; // No reverse needed
+        console.log('[TRACE] After reverse - first message:', messagesReversed[0]);
+        console.log('[TRACE] After reverse - last message:', messagesReversed[messagesReversed.length - 1]);
+        
+        // Clear the "Loading..." message
+        if (elements.chatMessages) {
+            elements.chatMessages.innerHTML = '';
+        }
+        
+        if (messagesReversed.length === 0) {
+            // No message history
+            if (elements.chatMessages) {
+                elements.chatMessages.innerHTML = `
+                    <div class="message system-message">
+                        <div class="message-content">
+                            <i class="bi bi-chat-dots"></i>
+                            No message history. Be the first to say something!
+                        </div>
+                    </div>
+                `;
+            }
+        } else {
+            // Show info message about history
+            if (elements.chatMessages) {
+                elements.chatMessages.innerHTML = `
+                    <div class="message system-message">
+                        <div class="message-content">
+                            <i class="bi bi-clock-history"></i>
+                            Showing last ${messagesReversed.length} message${messagesReversed.length > 1 ? 's' : ''}
+                        </div>
+                    </div>
+                `;
+            }
+            
+            // Display each message
+            messagesReversed.forEach(msg => {
+                displayRoomMessage(msg);
+            });
+        }
+        
+        // Scroll to bottom
+        if (elements.chatMessages) {
+            elements.chatMessages.scrollTop = elements.chatMessages.scrollHeight;
+        }
+        
+    } catch (error) {
+        console.error('[ERROR] Failed to load message history:', error);
+        if (elements.chatMessages) {
+            elements.chatMessages.innerHTML += `
+                <div class="message system-message">
+                    <div class="message-content">
+                        <i class="bi bi-exclamation-triangle"></i>
+                        Failed to load message history
+                    </div>
+                </div>
+            `;
+        }
+    }
+}
+
+// Display a room message in the UI
+function displayRoomMessage(msg) {
+    console.log('[TRACE] displayRoomMessage called:', msg);
+    
+    if (!elements.chatMessages) {
+        console.error('[ERROR] elements.chatMessages not found');
+        return;
+    }
+    
+    const messageDiv = document.createElement('div');
+    messageDiv.classList.add('message');
+    
+    // Determine message type
+    if (msg.sender_type === 'ai') {
+        messageDiv.classList.add('ai-message');
+    } else if (msg.sender_id === currentUser?.id) {
+        messageDiv.classList.add('sent');
+    } else {
+        messageDiv.classList.add('received');
+    }
+    
+    // Format timestamp
+    const timestamp = new Date(msg.created_at);
+    const timeStr = timestamp.toLocaleTimeString('en-US', { 
+        hour: '2-digit', 
+        minute: '2-digit' 
+    });
+    
+    // Build message HTML
+    const senderName = msg.sender_username || 'Unknown';
+    const isOwnMessage = msg.sender_id === currentUser?.id;
+    
+    messageDiv.innerHTML = `
+        <div class="message-header">
+            <span class="sender-name">${senderName}</span>
+            <span class="message-time">${timeStr}</span>
+        </div>
+        <div class="message-content">${escapeHtml(msg.content)}</div>
+    `;
+    
+    console.log('[TRACE] Appending message to DOM');
+    elements.chatMessages.appendChild(messageDiv);
+}
+
+// Logout handler
+function handleLogout() {
+    console.log('[TRACE] Logout initiated');
+    
+    // Close WebSocket connection
+    closeWebSocket();
+    
+    // Clear localStorage
+    localStorage.removeItem('token');
+    localStorage.removeItem('aiAssistantEnabled');
+    
+    // Redirect to login
+    window.location.href = '/login';
+}
+
+// TEST FUNCTION - Call this manually from console
+window.testMessageHistory = function(roomId) {
+    console.log('🧪 [TEST] Manual test of message history for room:', roomId);
+    loadRoomMessageHistory(roomId);
+};
+
+console.log('💡 TIP: Test message history manually with: testMessageHistory(26)');
+
 
 // Close WebSocket when page unloads
 window.addEventListener('beforeunload', () => {

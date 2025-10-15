@@ -831,6 +831,32 @@ async def websocket_endpoint(
                     content = message_data.get("content", "").strip()
                     if not content:
                         continue
+                    
+                    # SAVE MESSAGE TO DATABASE
+                    try:
+                        # Extract numeric room_id if room is private (room_26 -> 26)
+                        if room_id.startswith("room_"):
+                            numeric_room_id = int(room_id.replace("room_", ""))
+                        else:
+                            numeric_room_id = None  # General chat has no room_id
+                        
+                        if numeric_room_id:
+                            # Save to database using DataManager
+                            from datamanager.data_manager import DataManager
+                            dm = DataManager("data.sqlite.db")
+                            saved_msg = dm.add_room_message(
+                                room_id=numeric_room_id,
+                                sender_id=user.id,
+                                content=content,
+                                sender_type='user'
+                            )
+                            if saved_msg:
+                                logger.info(f"Saved message to database: room_id={numeric_room_id}, user_id={user.id}, msg_id={saved_msg.id}")
+                            else:
+                                logger.warning(f"Message save returned None: room_id={numeric_room_id}")
+                    except Exception as e:
+                        logger.error(f"Failed to save message to database: {e}")
+                        # Continue anyway - message still gets broadcast
                         
                     # Broadcast chat message to room
                     await chat_manager.broadcast({

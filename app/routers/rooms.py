@@ -349,29 +349,37 @@ async def join_public_room(
         
         print(f"[TRACE] join_public_room: password validated for room {room_id}")
     
-    # Check if already a member
-    members = dm.get_room_members(room_id)
-    is_member = any(m.user_id == current_user.id and m.is_active for m in members)
-    
-    if is_member:
-        print(f"[TRACE] join_public_room: user {current_user.id} already member of room {room_id}")
-        return {"message": "You are already a member of this room"}
-    
-    # Add user as member
+    # Check if already a member (active or inactive)
     with dm.get_session() as session:
         from datamanager.data_model import RoomMember
         
-        new_member = RoomMember(
-            room_id=room_id,
-            user_id=current_user.id,
-            role='member'
-        )
-        session.add(new_member)
-        session.commit()
+        # Check for existing membership
+        existing_member = session.query(RoomMember).filter(
+            RoomMember.room_id == room_id,
+            RoomMember.user_id == current_user.id
+        ).first()
         
-        print(f"[TRACE] join_public_room: user {current_user.id} joined public room {room_id}")
-    
-    return {"message": f"Successfully joined {room.name or 'the room'}"}
+        if existing_member:
+            if existing_member.is_active:
+                print(f"[TRACE] join_public_room: user {current_user.id} already active member of room {room_id}")
+                return {"message": "You are already a member of this room"}
+            else:
+                # Reactivate membership
+                existing_member.is_active = True
+                session.commit()
+                print(f"[TRACE] join_public_room: reactivated membership for user {current_user.id} in room {room_id}")
+                return {"message": f"Successfully rejoined {room.name or 'the room'}"}
+        else:
+            # Add new member
+            new_member = RoomMember(
+                room_id=room_id,
+                user_id=current_user.id,
+                role='member'
+            )
+            session.add(new_member)
+            session.commit()
+            print(f"[TRACE] join_public_room: user {current_user.id} joined public room {room_id}")
+            return {"message": f"Successfully joined {room.name or 'the room'}"}
 
 
 @router.post("/{room_id}/leave", status_code=status.HTTP_200_OK)

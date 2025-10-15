@@ -479,6 +479,9 @@ class PrivateRoomsManager {
         if (this.elements.backToMainBtn) {
             this.elements.backToMainBtn.style.display = 'block';
         }
+        
+        // Show leave room button (if user is a member and it's their room)
+        this.updateLeaveRoomButton(room);
 
         // Trigger callback if set
         if (this.onRoomSelected) {
@@ -486,6 +489,26 @@ class PrivateRoomsManager {
         }
 
         console.log('[TRACE] Room selection complete');
+    }
+    
+    /**
+     * Update leave room button visibility
+     */
+    updateLeaveRoomButton(room) {
+        const leaveBtn = document.getElementById('leave-room-btn');
+        if (!leaveBtn) return;
+        
+        // Show button if user is a member and not the creator
+        const currentUserId = window.currentUser?.id;
+        const isMember = room.is_member;
+        const isCreator = room.creator_id === currentUserId;
+        
+        if (isMember && !isCreator) {
+            leaveBtn.style.display = 'inline-block';
+            leaveBtn.onclick = () => this.leaveRoom(room.id, room.name);
+        } else {
+            leaveBtn.style.display = 'none';
+        }
     }
 
     /**
@@ -752,6 +775,63 @@ class PrivateRoomsManager {
         } catch (error) {
             console.error('[ERROR] joinRoom failed:', error);
             this.showError(error.message || 'Failed to join room');
+        }
+    }
+
+    /**
+     * Leave a room (members only)
+     * 
+     * OBSERVABILITY: Logs leave attempts
+     * TRACEABILITY: Tracks room_id, user_id
+     * EVALUATION: Confirms leave with user
+     */
+    async leaveRoom(roomId, roomName) {
+        console.log('[TRACE] leaveRoom:', { room_id: roomId, name: roomName });
+        
+        // EVALUATION: Confirm leave
+        if (!confirm(`Are you sure you want to leave "${roomName}"?`)) {
+            console.log('[EVAL] leaveRoom: user cancelled');
+            return;
+        }
+        
+        try {
+            const token = this.getToken();
+            const response = await fetch(`${this.apiBaseUrl}/${roomId}/leave`, {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/json'
+                }
+            });
+            
+            if (!response.ok) {
+                const error = await response.json();
+                throw new Error(error.detail || 'Failed to leave room');
+            }
+            
+            console.log('[TRACE] leaveRoom: success');
+            this.showSuccess(`Left "${roomName}" successfully!`);
+            
+            // Go back to main chat
+            if (this.onRoomSelected) {
+                this.onRoomSelected({ id: 'main', name: 'General Chat', is_main: true });
+            }
+            
+            // Hide back button and leave button
+            if (this.elements.backToMainBtn) {
+                this.elements.backToMainBtn.style.display = 'none';
+            }
+            const leaveBtn = document.getElementById('leave-room-btn');
+            if (leaveBtn) {
+                leaveBtn.style.display = 'none';
+            }
+            
+            // Reload rooms list
+            await this.loadRooms();
+            
+        } catch (error) {
+            console.error('[ERROR] leaveRoom failed:', error);
+            this.showError(error.message || 'Failed to leave room');
         }
     }
 
