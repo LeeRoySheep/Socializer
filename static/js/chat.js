@@ -12,6 +12,9 @@
 // Import AuthService for logout functionality
 import { authService } from './auth/AuthService.js';
 
+// Import PrivateRoomsManager for private chat rooms
+import { privateRoomsManager } from './chat/PrivateRooms.js';
+
 console.log('[CHAT] chat.js loaded');
 
 // ============================================
@@ -1397,7 +1400,7 @@ function handleTyping() {
 // Initialization
 // ============================================
 
-function setupEventListeners() {
+async function setupEventListeners() {
     // Message form
     if (elements.messageForm) {
         elements.messageForm.addEventListener('submit', handleMessageSubmit);
@@ -1426,15 +1429,91 @@ function setupEventListeners() {
     }
     
 
-    // Private chat button
-    const privateChatBtn = document.getElementById('private-chat-btn');
-    if (privateChatBtn) {
-        privateChatBtn.addEventListener('click', () => {
-            console.log('[CHAT] Private chat button clicked');
-            // TODO: Implement private chat functionality
-            alert('Private chat feature coming soon!');
-        });
-        console.log('[CHAT] Private chat button handler attached');
+    // Initialize private rooms manager
+    console.log('[CHAT] Initializing private rooms manager...');
+    try {
+        await privateRoomsManager.init();
+        
+        // Set callback for when a room is selected
+        privateRoomsManager.onRoomSelected = (room) => {
+            console.log('[CHAT] Room selected callback:', room);
+            
+            // Check if going back to main
+            if (room.is_main) {
+                currentRoom = CHAT_ROOM;
+                currentUser.room = currentRoom;
+                console.log(`[TRACE] Switched back to main chat`);
+                
+                const currentRoomEl = document.getElementById('current-room');
+                const roomDescEl = document.getElementById('room-description');
+                
+                if (currentRoomEl) {
+                    currentRoomEl.textContent = 'General Chat';
+                }
+                
+                if (roomDescEl) {
+                    roomDescEl.textContent = 'Everyone can join this chat';
+                }
+                
+                // Notify WebSocket of room change
+                if (socket && socket.readyState === WebSocket.OPEN) {
+                    socket.send(JSON.stringify({
+                        type: 'join_room',
+                        room_id: 'general',
+                        timestamp: new Date().toISOString()
+                    }));
+                }
+                
+                return;
+            }
+            
+            // SWITCH TO PRIVATE ROOM
+            currentRoom = `room_${room.id}`;
+            currentUser.room = currentRoom;
+            
+            console.log(`[TRACE] Switched to room: ${currentRoom}`);
+            
+            // Update UI
+            const currentRoomEl = document.getElementById('current-room');
+            const roomDescEl = document.getElementById('room-description');
+            
+            if (currentRoomEl) {
+                currentRoomEl.textContent = room.name || `Room #${room.id}`;
+            }
+            
+            if (roomDescEl) {
+                let desc = `${room.member_count || 0} members`;
+                if (room.password) desc += ' • 🔒 Protected';
+                if (room.ai_enabled) desc += ' • 🤖 AI Active';
+                roomDescEl.textContent = desc;
+            }
+            
+            // Notify WebSocket of room change
+            if (socket && socket.readyState === WebSocket.OPEN) {
+                socket.send(JSON.stringify({
+                    type: 'join_room',
+                    room_id: currentRoom,
+                    timestamp: new Date().toISOString()
+                }));
+                console.log(`[TRACE] Sent join_room message for ${currentRoom}`);
+            }
+            
+            // Clear messages and load room history
+            if (elements.messages) {
+                elements.messages.innerHTML = `
+                    <div class="message system-message">
+                        <div class="message-content">
+                            <i class="bi bi-door-open"></i>
+                            Switched to ${room.name || 'private room'}
+                        </div>
+                    </div>
+                `;
+            }
+        };
+        
+        console.log('[CHAT] Private rooms manager initialized successfully');
+    } catch (error) {
+        console.error('[ERROR] Failed to initialize private rooms:', error);
     }
 
     // AI Toggle button
@@ -1506,7 +1585,7 @@ async function initialize() {
         // Display current user info in sidebar
         updateCurrentUserDisplay();
         
-        setupEventListeners();
+        await setupEventListeners();
         
         // Restore AI assistant state from localStorage
         const aiEnabled = localStorage.getItem('aiAssistantEnabled') === 'true';

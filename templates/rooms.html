@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Private Rooms - Socializer</title>
+    
+    <!-- Bootstrap 5 CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    
+    <!-- Bootstrap Icons -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css">
+    
+    <!-- Custom CSS -->
+    <link rel="stylesheet" href="{{ url_for('static', path='/css/rooms.css') }}">
+    
+    <style>
+        /* Additional inline styles for quick customization */
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+        }
+    </style>
+</head>
+<body>
+    <!-- Navigation Bar -->
+    <nav class="navbar navbar-dark bg-primary">
+        <div class="container-fluid">
+            <a class="navbar-brand" href="/">
+                <i class="bi bi-chat-dots-fill"></i> Socializer
+            </a>
+            <div class="d-flex align-items-center gap-3">
+                <span class="text-white">
+                    <i class="bi bi-person-circle"></i>
+                    <span id="username">{{ username }}</span>
+                </span>
+                <button class="btn btn-sm btn-outline-light" onclick="toggleMainChat()">
+                    <i class="bi bi-chat-left-text"></i> Main Chat
+                </button>
+                <button class="btn btn-sm btn-outline-light" onclick="logout()">
+                    <i class="bi bi-box-arrow-right"></i> Logout
+                </button>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Main Container -->
+    <div id="room-container">
+        <!-- Room sidebar and chat area will be rendered here by RoomUI -->
+    </div>
+
+    <!-- User Data for JavaScript -->
+    <script>
+        // Make user data available globally
+        window.currentUser = {
+            username: "{{ username }}",
+            id: {{ user_id }}
+        };
+        
+        // Access token for API calls
+        window.ACCESS_TOKEN = "{{ access_token }}";
+        
+        // OBSERVABILITY: Log page load
+        console.log('[TRACE] Rooms page loaded', { 
+            user: window.currentUser.username,
+            user_id: window.currentUser.id 
+        });
+    </script>
+
+    <!-- Bootstrap 5 JS Bundle -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+
+    <!-- Main Application Script - ES6 Module -->
+    <script type="module">
+        // Import modules using ES6 imports
+        import { RoomUI } from '/static/js/modules/RoomUI.js';
+
+        // Initialize UI when DOM is ready
+        document.addEventListener('DOMContentLoaded', () => {
+            console.log('[TRACE] Initializing RoomUI');
+            
+            try {
+                // Initialize the room UI
+                window.roomUI = new RoomUI('room-container');
+                
+                console.log('[TRACE] RoomUI initialized successfully');
+            } catch (error) {
+                console.error('[ERROR] Failed to initialize RoomUI', { error: error.message });
+                
+                // Show error to user
+                document.getElementById('room-container').innerHTML = `
+                    <div class="alert alert-danger m-4" role="alert">
+                        <h4 class="alert-heading">Initialization Error</h4>
+                        <p>Failed to load private rooms interface.</p>
+                        <hr>
+                        <p class="mb-0">Error: ${error.message}</p>
+                        <button class="btn btn-sm btn-primary mt-2" onclick="location.reload()">
+                            Reload Page
+                        </button>
+                    </div>
+                `;
+            }
+        });
+
+        // Global helper functions
+        window.toggleMainChat = function() {
+            console.log('[TRACE] Navigating to main chat');
+            window.location.href = '/chat';
+        };
+
+        window.logout = function() {
+            console.log('[TRACE] User logout initiated');
+            
+            // Clear storage
+            localStorage.removeItem('access_token');
+            
+            // Redirect to login
+            window.location.href = '/logout';
+        };
+
+        // Handle WebSocket errors globally
+        window.addEventListener('error', (event) => {
+            console.error('[ERROR] Global error', { 
+                message: event.message,
+                filename: event.filename,
+                lineno: event.lineno 
+            });
+        });
+
+        // Log unhandled promise rejections
+        window.addEventListener('unhandledrejection', (event) => {
+            console.error('[ERROR] Unhandled promise rejection', { 
+                reason: event.reason 
+            });
+        });
+    </script>
+
+    <!-- Service Worker for offline support (optional, best practice) -->
+    <script>
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                // Register service worker if available
+                // This is optional but a best practice for modern web apps
+                console.log('[TRACE] Service Worker support detected (not registered yet)');
+            });
+        }
+    </script>
+</body>
+</html>

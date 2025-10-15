@@ -9,7 +9,9 @@
 
 Added optional password protection to private chat rooms, allowing creators to:
 - **Open rooms** - Anyone can join (default)
-- **Protected rooms** - Require password to accept invite and join
+- **Protected rooms** - Require password for uninvited users only
+
+**IMPORTANT:** Invited users bypass password protection (they are explicitly trusted by room members)
 
 ---
 
@@ -58,15 +60,15 @@ print(f"[ERROR] create_room exception: creator_id={creator_id}, error={e}")
 - **EVALUATION**: Validates inputs, logs outcomes
 
 #### `accept_invite()`
-- Added `password` parameter
-- Validates password before adding member
+- Added `password` parameter (optional, for future use)
+- **Invited users bypass password check** (explicit trust)
 - **OBSERVABILITY**: Logs all validation steps
 - **TRACEABILITY**: Tracks invite_id, user_id, room_id
 - **EVALUATION**: Multiple validation checkpoints:
   - Invite exists
   - User is invitee
   - Status is pending
-  - Password matches (if required)
+  - Password NOT checked (invited users are trusted)
 
 ---
 

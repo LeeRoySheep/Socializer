@@ -696,7 +696,11 @@ class DataManager:
         """
         with self.get_session() as session:
             try:
-                return session.query(ChatRoom).filter(ChatRoom.id == room_id).first()
+                room = session.query(ChatRoom).filter(ChatRoom.id == room_id).first()
+                if room:
+                    # Make object accessible outside session by expunging it
+                    session.expunge(room)
+                return room
             except Exception as e:
                 print(f"Error getting room: {e}")
                 return None
@@ -724,6 +728,9 @@ class DataManager:
                     .order_by(ChatRoom.created_at.desc())
                     .all()
                 )
+                # Make objects accessible outside session
+                for room in rooms:
+                    session.expunge(room)
                 return rooms
             except Exception as e:
                 print(f"Error getting user rooms: {e}")
@@ -817,13 +824,10 @@ class DataManager:
                     print(f"[EVAL] accept_invite failed: invite status is '{invite.status}', expected 'pending'")
                     return False
                 
-                # Check room password if set
-                room = session.query(ChatRoom).filter(ChatRoom.id == invite.room_id).first()
-                if room and room.password:
-                    if not password or password != room.password:
-                        print(f"[EVAL] accept_invite failed: invalid password for room {room.id}")
-                        return False
-                    print(f"[TRACE] Password validated for room {room.id}")
+                # IMPORTANT: Invited users do NOT need password!
+                # Password protection only applies to uninvited users trying to join directly.
+                # Since this user has a valid invite, they bypass password check.
+                print(f"[TRACE] User {user_id} has valid invite - bypassing password check")
                 
                 # Update invite status
                 invite.status = 'accepted'
@@ -953,6 +957,9 @@ class DataManager:
                     .limit(limit)
                     .all()
                 )
+                # Make objects accessible outside session
+                for msg in messages:
+                    session.expunge(msg)
                 return list(reversed(messages))  # Return in chronological order
             except Exception as e:
                 print(f"Error getting room messages: {e}")
@@ -970,7 +977,7 @@ class DataManager:
         """
         with self.get_session() as session:
             try:
-                return (
+                members = (
                     session.query(RoomMember)
                     .filter(
                         RoomMember.room_id == room_id,
@@ -978,6 +985,10 @@ class DataManager:
                     )
                     .all()
                 )
+                # Make objects accessible outside session
+                for member in members:
+                    session.expunge(member)
+                return members
             except Exception as e:
                 print(f"Error getting room members: {e}")
                 return []
@@ -1054,7 +1065,7 @@ class DataManager:
         """
         with self.get_session() as session:
             try:
-                return (
+                invites = (
                     session.query(RoomInvite)
                     .filter(
                         RoomInvite.invitee_id == user_id,
@@ -1063,6 +1074,10 @@ class DataManager:
                     .order_by(RoomInvite.created_at.desc())
                     .all()
                 )
+                # Make objects accessible outside session
+                for invite in invites:
+                    session.expunge(invite)
+                return invites
             except Exception as e:
                 print(f"Error getting pending invites: {e}")
                 return []

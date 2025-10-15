@@ -417,6 +417,32 @@ async def read_users_me(
         updated_at=getattr(current_user, 'updated_at', None)
     )
 
+
+@app.get("/api/users/", response_model=List[UserResponse])
+async def list_users(
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Get list of all users (for inviting to rooms).
+    
+    Returns list of basic user information.
+    """
+    users = db.query(User).filter(User.is_active == True).all()
+    
+    return [
+        UserResponse(
+            id=user.id,
+            username=user.username,
+            email=user.hashed_email,
+            is_active=user.is_active,
+            role=getattr(user, 'role', 'user'),
+            created_at=getattr(user, 'created_at', None),
+            updated_at=getattr(user, 'updated_at', None)
+        )
+        for user in users
+    ]
+
 # New Chat Interface
 
 # Chat endpoints
@@ -446,8 +472,10 @@ async def chat_page(request: Request, current_user: User = Depends(get_current_a
             "new-chat.html",
             {
                 "request": request,
-                "user": user_data,
-                "token": token
+                "current_user": user_data,
+                "user": user_data,  # Keep for backward compatibility
+                "token": token,
+                "access_token": token  # Also pass as access_token
             }
         )
     except Exception as e:
@@ -835,6 +863,29 @@ async def websocket_endpoint(
                     })
                     logger.info(f"Pong sent to client {client_id}")
                     
+                elif message_type == "join_room":
+                    # Switch to a different room
+                    new_room_id = message_data.get("room_id")
+                    if new_room_id:
+                        # Leave current room (NOT async)
+                        chat_manager.leave_room(client_id, str(user.id), room_id)
+                        
+                        # Update room_id variable
+                        room_id = new_room_id
+                        
+                        # Join new room
+                        await chat_manager.join_room(client_id, str(user.id), room_id)
+                        
+                        logger.info(f"User {user.id} switched to room {room_id}")
+                        
+                        # Send confirmation
+                        await chat_manager.send_personal_message({
+                            "type": "room_joined",
+                            "room_id": room_id,
+                            "message": f"Joined room {room_id}",
+                            "timestamp": datetime.utcnow().isoformat()
+                        }, client_id)
+                    
                 elif message_type == "get_online_users":
                     # Get list of online users
                     online_users = []
@@ -1016,6 +1067,71 @@ async def register_page(request: Request):
             "error": error.replace("+", " ") if error else None
         }
     )
+
+@app.get("/rooms")
+async def rooms_page(
+    request: Request,
+    db: Session = Depends(get_db)
+):
+    """
+    Serve the private rooms page.
+    Requires authentication - redirects to /login if not authenticated.
+    
+    OBSERVABILITY: Logs page access attempts
+    """
+    print("\n[TRACE] ====== ROOMS PAGE REQUEST ======")
+    print(f"[TRACE] Request URL: {request.url}")
+    
+    try:
+        # Get token from cookies or URL
+        token = request.query_params.get("token") or request.cookies.get("access_token")
+        
+        if not token:
+            print("[EVAL] rooms_page: no token, redirecting to login")
+            return RedirectResponse(url="/login?error=Please+log+in+first")
+        
+        # Verify token and get user
+        from app.auth import SECRET_KEY, ALGORITHM
+        from jose import JWTError, jwt
+        
+        try:
+            payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+            username = payload.get("sub")
+            
+            if not username:
+                print("[EVAL] rooms_page: invalid token, no username")
+                return RedirectResponse(url="/login?error=Invalid+session")
+            
+            # Get user from database
+            from datamanager.data_manager import DataManager
+            dm = DataManager("data.sqlite.db")
+            user = dm.get_user_by_username(username)
+            
+            if not user:
+                print(f"[EVAL] rooms_page: user {username} not found")
+                return RedirectResponse(url="/login?error=User+not+found")
+            
+            print(f"[TRACE] rooms_page: authenticated user {username} (ID: {user.id})")
+            
+            # Serve the rooms page
+            return templates.TemplateResponse(
+                "rooms.html",
+                {
+                    "request": request,
+                    "username": user.username,
+                    "user_id": user.id,
+                    "access_token": token
+                }
+            )
+            
+        except JWTError as e:
+            print(f"[ERROR] rooms_page: JWT error - {e}")
+            return RedirectResponse(url="/login?error=Session+expired")
+            
+    except Exception as e:
+        print(f"[ERROR] rooms_page: exception - {e}")
+        return RedirectResponse(url="/login?error=An+error+occurred")
+
 
 @app.get("/chat")
 async def chat_page(

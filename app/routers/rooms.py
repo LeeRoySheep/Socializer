@@ -138,16 +138,25 @@ async def create_room(
     - **name**: Optional custom name (auto-generated if not provided)
     - **invitees**: List of user IDs to invite
     - **room_type**: 'direct' for 1-on-1, 'group' for multiple users
-    - **ai_enabled**: Whether AI should participate (default: True)
+    - **ai_enabled**: AI is ALWAYS enabled for moderation (monitoring empathy, cultural sensitivity, misunderstandings)
     """
     dm = get_dm()
+    
+    # IMPORTANT: AI is always enabled for all rooms to monitor:
+    # - Misunderstandings between users
+    # - Lack of empathy
+    # - Cultural and social context
+    # - Communication standards
+    import sys
+    print(f"[TRACE] create_room: AI moderation enforced (always enabled)", flush=True)
+    sys.stdout.flush()
     
     # Create room
     room = dm.create_room(
         creator_id=current_user.id,
         name=room_data.name,
         room_type=room_data.room_type,
-        ai_enabled=room_data.ai_enabled,
+        ai_enabled=True,  # ALWAYS TRUE - AI is mandatory for moderation
         password=room_data.password
     )
     
@@ -233,37 +242,40 @@ async def get_room(
     )
 
 
-@router.delete("/{room_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/{room_id}", status_code=status.HTTP_200_OK)
 async def delete_room(
     room_id: int,
     current_user: User = Depends(get_current_user)
 ):
     """
-    Delete a room (creator only).
-    
-    Only the room creator can delete the room.
+    Delete a room. Only the creator can delete.
+    Soft deletes by marking as inactive.
     """
     dm = get_dm()
-    room = dm.get_room(room_id)
     
-    if not room:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Room not found"
-        )
-    
-    if room.creator_id != current_user.id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only the room creator can delete the room"
-        )
-    
-    # Mark room as inactive (soft delete)
-    # We'll add this method if needed
-    raise HTTPException(
-        status_code=status.HTTP_501_NOT_IMPLEMENTED,
-        detail="Room deletion not yet implemented"
-    )
+    with dm.get_session() as session:
+        room = session.query(ChatRoom).filter(ChatRoom.id == room_id).first()
+        
+        if not room:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Room not found"
+            )
+        
+        # Only creator can delete
+        if room.creator_id != current_user.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Only the room creator can delete this room"
+            )
+        
+        # Deactivate the room (soft delete)
+        room.is_active = False
+        session.commit()
+        
+        print(f"[TRACE] delete_room: room {room_id} deleted by user {current_user.id}", flush=True)
+        
+    return {"message": "Room deleted successfully"}
 
 
 @router.post("/{room_id}/leave", status_code=status.HTTP_200_OK)
@@ -340,6 +352,58 @@ async def get_room_members(
 # INVITE MANAGEMENT ENDPOINTS
 # ==========================================
 
+class BatchInviteRequest(BaseModel):
+    """Request model for batch inviting users."""
+    user_ids: List[int] = Field(..., description="List of user IDs to invite")
+
+
+@router.post("/{room_id}/invite", status_code=status.HTTP_201_CREATED)
+async def invite_users_batch(
+    room_id: int,
+    invite_data: BatchInviteRequest,
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Invite multiple users to a room.
+    
+    User must be a member to invite others.
+    """
+    dm = get_dm()
+    check_room_access(room_id, current_user.id, dm)
+    
+    invited_count = 0
+    failed_users = []
+    
+    for user_id in invite_data.user_ids:
+        try:
+            # Check if invitee exists
+            invitee = dm.get_user(user_id)
+            if not invitee:
+                failed_users.append({"user_id": user_id, "reason": "User not found"})
+                continue
+            
+            # Check if already a member
+            if dm.is_user_in_room(user_id, room_id):
+                failed_users.append({"user_id": user_id, "reason": "Already a member"})
+                continue
+            
+            # Send invite
+            invite = dm.invite_user_to_room(room_id, current_user.id, user_id)
+            
+            if invite:
+                invited_count += 1
+            else:
+                failed_users.append({"user_id": user_id, "reason": "Failed to create invite"})
+        except Exception as e:
+            failed_users.append({"user_id": user_id, "reason": str(e)})
+    
+    return {
+        "message": f"Invited {invited_count} user(s) successfully",
+        "invited_count": invited_count,
+        "failed": failed_users
+    }
+
+
 @router.post("/{room_id}/invite/{user_id}", status_code=status.HTTP_201_CREATED)
 async def invite_user(
     room_id: int,
@@ -347,7 +411,7 @@ async def invite_user(
     current_user: User = Depends(get_current_user)
 ):
     """
-    Invite a user to a room.
+    Invite a single user to a room.
     
     User must be a member to invite others.
     """
@@ -419,7 +483,8 @@ async def accept_invite(
     """
     Accept a room invite.
     
-    If room is password-protected, password must be provided.
+    IMPORTANT: Invited users do NOT need to provide password.
+    Password protection only applies to uninvited users trying to join directly.
     User will be added as a member and can start chatting.
     """
     dm = get_dm()
@@ -429,7 +494,7 @@ async def accept_invite(
     if not success:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Failed to accept invite. Check password or invite status."
+            detail="Failed to accept invite. Invite may be invalid or already processed."
         )
     
     return {"message": "Invite accepted successfully"}

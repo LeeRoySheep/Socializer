@@ -105,10 +105,87 @@
             font-weight: 600;
         }
 
+        .rooms-list {
+            padding: 1rem;
+            overflow-y: auto;
+            max-height: 250px;
+        }
+        
+        .invites-list {
+            padding: 0 1rem;
+            overflow-y: auto;
+            max-height: 200px;
+        }
+
+        .room-item {
+            display: flex;
+            align-items: center;
+            padding: 0.75rem;
+            margin-bottom: 0.5rem;
+            border-radius: 10px;
+            background: linear-gradient(135deg, rgba(102, 126, 234, 0.1), rgba(118, 75, 162, 0.1));
+            transition: all 0.3s ease;
+            cursor: pointer;
+            border: 2px solid transparent;
+        }
+
+        .room-item:hover {
+            background: linear-gradient(135deg, rgba(102, 126, 234, 0.2), rgba(118, 75, 162, 0.2));
+            transform: translateX(5px);
+            border-color: rgba(102, 126, 234, 0.3);
+        }
+
+        .room-item.active {
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            border-color: #667eea;
+        }
+
+        .room-item.active .room-name,
+        .room-item.active .room-info {
+            color: white !important;
+        }
+
+        .room-icon {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            background: linear-gradient(45deg, #667eea, #764ba2);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            margin-right: 1rem;
+            font-size: 1.2rem;
+        }
+
+        .room-item.active .room-icon {
+            background: white;
+            color: #667eea;
+        }
+
+        .room-details {
+            flex: 1;
+        }
+
+        .room-name {
+            font-weight: 600;
+            color: #333;
+            margin-bottom: 0.2rem;
+        }
+
+        .room-info {
+            font-size: 0.8rem;
+            color: #666;
+            display: flex;
+            gap: 0.5rem;
+            align-items: center;
+        }
+
         .online-users-list {
             flex: 1;
             padding: 1rem;
             overflow-y: auto;
+            max-height: 300px;
         }
 
         .user-item {
@@ -562,9 +639,37 @@
 
         <!-- Main Content -->
         <div class="main-content">
-            <!-- Left Sidebar - Online Users -->
+            <!-- Left Sidebar - Online Users & Rooms -->
             <div class="left-sidebar">
+                <!-- Back to Main Chat Button -->
+                <div class="p-2">
+                    <button class="btn btn-sm btn-outline-primary w-100" id="back-to-main-btn" style="display: none;">
+                        <i class="bi bi-arrow-left"></i> Back to Main Chat
+                    </button>
+                </div>
+                
+                <!-- Private Rooms Section -->
                 <div class="sidebar-header">
+                    <h4>Private Rooms</h4>
+                </div>
+                <div class="rooms-list" id="rooms-list">
+                    <!-- Private rooms will be displayed here -->
+                    <div class="text-center text-muted p-3" id="no-rooms-msg">
+                        <i class="bi bi-chat-dots"></i>
+                        <p class="mb-0">No private rooms yet</p>
+                    </div>
+                </div>
+                
+                <!-- Pending Invites Section -->
+                <div class="sidebar-header mt-3" id="invites-header" style="display: none;">
+                    <h4>Pending Invites</h4>
+                </div>
+                <div class="invites-list" id="invites-list">
+                    <!-- Pending invites will be displayed here -->
+                </div>
+                
+                <!-- Online Users Section -->
+                <div class="sidebar-header mt-3">
                     <h4>Online Users</h4>
                 </div>
                 <div class="online-users-list" id="online-users-list">
@@ -622,18 +727,103 @@
         </div>
     </div>
 
+    <!-- Create Room Modal -->
+    <div class="modal fade" id="createRoomModal" tabindex="-1" aria-labelledby="createRoomModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="createRoomModalLabel">
+                        <i class="bi bi-chat-dots-fill"></i> Create Private Room
+                    </h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <form id="create-room-form">
+                        <!-- Room Name -->
+                        <div class="mb-3">
+                            <label for="room-name" class="form-label">Room Name (Optional)</label>
+                            <input type="text" class="form-control" id="room-name" placeholder="Leave empty for auto-generated name">
+                            <div class="form-text">e.g., "Project Team", "Study Group"</div>
+                        </div>
+
+                        <!-- Password Protection -->
+                        <div class="mb-3">
+                            <div class="form-check form-switch">
+                                <input class="form-check-input" type="checkbox" id="room-password-toggle">
+                                <label class="form-check-label" for="room-password-toggle">
+                                    <i class="bi bi-lock"></i> Password Protected
+                                </label>
+                            </div>
+                        </div>
+
+                        <!-- Password Input (hidden by default) -->
+                        <div class="mb-3" id="password-input-group" style="display: none;">
+                            <label for="room-password" class="form-label">Password</label>
+                            <input type="password" class="form-control" id="room-password" placeholder="Enter room password">
+                        </div>
+
+                        <!-- AI Assistant (Always Enabled) -->
+                        <div class="mb-3">
+                            <div class="alert alert-info mb-0">
+                                <div class="d-flex align-items-start">
+                                    <i class="bi bi-robot fs-4 me-3"></i>
+                                    <div>
+                                        <h6 class="mb-1"><strong>AI Moderator Always Active</strong></h6>
+                                        <small>
+                                            Our AI assistant monitors all conversations to:
+                                            <ul class="mb-0 mt-1">
+                                                <li>Detect and clarify misunderstandings</li>
+                                                <li>Promote empathy and respectful communication</li>
+                                                <li>Consider cultural and social contexts</li>
+                                                <li>Suggest better communication approaches</li>
+                                            </ul>
+                                        </small>
+                                    </div>
+                                </div>
+                            </div>
+                            <input type="hidden" id="room-ai-toggle" value="true">
+                        </div>
+
+                        <!-- Invite Users -->
+                        <div class="mb-3">
+                            <label for="room-invites" class="form-label">Invite Users (Optional)</label>
+                            <select class="form-select" id="room-invites" multiple size="3">
+                                <!-- Will be populated with online users -->
+                            </select>
+                            <div class="form-text">Hold Ctrl/Cmd to select multiple users</div>
+                        </div>
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="button" class="btn btn-primary" id="create-room-btn">
+                        <i class="bi bi-plus-lg"></i> Create Room
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- User Data -->
     <script>
         // Make user data available to the frontend JavaScript
         window.currentUser = {
-            id: "{{ user.id }}",
-            username: "{{ user.username }}",
-            email: "{{ user.hashed_email }}",
-            is_active: "{{ user.is_active }}",
-            role: "{{ user.role }}",
-            createdAt: "{{ user.created_at }}",
+            id: {{ current_user['id'] }},
+            username: "{{ current_user['username'] }}",
+            email: "{{ current_user['email'] or '' }}",
+            is_active: {{ 'true' if current_user['is_active'] else 'false' }},
+            role: "{{ current_user['role'] or 'user' }}",
+            createdAt: "{{ current_user['created_at'] or '' }}",
             token: "{{ token }}"
         };
+        
+        // Also set as window.ACCESS_TOKEN for compatibility
+        window.ACCESS_TOKEN = "{{ access_token }}";
+        
+        console.log('[TRACE] User data loaded:', {
+            username: window.currentUser.username,
+            id: window.currentUser.id
+        });
     </script>
 
     <!-- Scripts -->
