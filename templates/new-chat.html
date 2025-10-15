@@ -78,6 +78,61 @@
             box-shadow: 0 5px 15px rgba(255, 107, 107, 0.4);
         }
 
+        /* LLM Model Switcher */
+        .llm-switcher-container {
+            position: relative;
+            display: flex;
+            align-items: center;
+        }
+
+        .llm-model-selector {
+            appearance: none;
+            background: linear-gradient(45deg, #48c6ef, #6f86d6);
+            border: none;
+            color: white;
+            padding: 0.5rem 2.5rem 0.5rem 1rem;
+            border-radius: 25px;
+            font-size: 0.85rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            box-shadow: 0 2px 8px rgba(72, 198, 239, 0.3);
+            min-width: 180px;
+        }
+
+        .llm-model-selector:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(72, 198, 239, 0.5);
+        }
+
+        .llm-model-selector:focus {
+            outline: none;
+            box-shadow: 0 0 0 3px rgba(72, 198, 239, 0.3);
+        }
+
+        .model-icon {
+            position: absolute;
+            right: 10px;
+            pointer-events: none;
+            color: white;
+            font-size: 1rem;
+        }
+
+        .llm-model-selector option {
+            background: white;
+            color: #333;
+            padding: 0.5rem;
+        }
+
+        /* Local model indicator */
+        .llm-model-selector.local-mode {
+            background: linear-gradient(45deg, #11998e, #38ef7d);
+        }
+
+        .llm-model-selector.local-mode:hover {
+            box-shadow: 0 5px 15px rgba(56, 239, 125, 0.5);
+        }
+
         /* Main Content Area */
         .main-content {
             display: flex;
@@ -821,6 +876,24 @@
                 <span class="badge bg-primary" id="online-count">0 online</span>
             </div>
             <div class="right-section">
+                <!-- LLM Model Switcher -->
+                <div class="llm-switcher-container">
+                    <select id="llm-model-selector" class="llm-model-selector" title="Select AI Model">
+                        <optgroup label="☁️ Cloud Models">
+                            <option value="gpt-4o-mini" selected>GPT-4o Mini (Fast)</option>
+                            <option value="gpt-4o">GPT-4o (Balanced)</option>
+                            <option value="gpt-4-turbo">GPT-4 Turbo (Advanced)</option>
+                            <option value="claude-3-5-sonnet-20241022">Claude 3.5 Sonnet</option>
+                            <option value="gemini-2.0-flash-exp">Gemini 2.0 Flash</option>
+                        </optgroup>
+                        <optgroup label="💻 Local Models">
+                            <option value="lm-studio-local">LM Studio (Local)</option>
+                            <option value="ollama-local">Ollama (Local)</option>
+                        </optgroup>
+                    </select>
+                    <i class="bi bi-cpu model-icon"></i>
+                </div>
+                
                 <button id="private-chat-btn" class="private-chat-btn">
                     <i class="bi bi-plus-lg"></i>
                     Private Chat
@@ -1076,6 +1149,123 @@
             }
         });
     </script>
+    
+    <!-- LLM Model Switcher Script -->
+    <script>
+        // LLM Model Management
+        const LLM_STORAGE_KEY = 'socializer_selected_llm_model';
+        
+        document.addEventListener('DOMContentLoaded', function() {
+            const modelSelector = document.getElementById('llm-model-selector');
+            
+            // Load saved model preference
+            const savedModel = localStorage.getItem(LLM_STORAGE_KEY);
+            if (savedModel) {
+                modelSelector.value = savedModel;
+                console.log('🤖 Loaded saved LLM model:', savedModel);
+            }
+            
+            // Update visual indicator based on model type
+            function updateModelIndicator(model) {
+                const isLocal = model.includes('lm-studio') || model.includes('ollama');
+                if (isLocal) {
+                    modelSelector.classList.add('local-mode');
+                } else {
+                    modelSelector.classList.remove('local-mode');
+                }
+            }
+            
+            // Initialize indicator
+            updateModelIndicator(modelSelector.value);
+            
+            // Handle model change
+            modelSelector.addEventListener('change', function() {
+                const selectedModel = this.value;
+                localStorage.setItem(LLM_STORAGE_KEY, selectedModel);
+                
+                // Update visual indicator
+                updateModelIndicator(selectedModel);
+                
+                // Show notification
+                showModelChangeNotification(selectedModel);
+                
+                // Emit model change event for chat.js to listen
+                window.dispatchEvent(new CustomEvent('llm-model-changed', {
+                    detail: { model: selectedModel }
+                }));
+                
+                console.log('🔄 LLM model changed to:', selectedModel);
+            });
+        });
+        
+        function showModelChangeNotification(model) {
+            const modelNames = {
+                'gpt-4o-mini': 'GPT-4o Mini (Fast)',
+                'gpt-4o': 'GPT-4o (Balanced)',
+                'gpt-4-turbo': 'GPT-4 Turbo (Advanced)',
+                'claude-3-5-sonnet-20241022': 'Claude 3.5 Sonnet',
+                'gemini-2.0-flash-exp': 'Gemini 2.0 Flash',
+                'lm-studio-local': 'LM Studio (Local)',
+                'ollama-local': 'Ollama (Local)'
+            };
+            
+            const notification = document.createElement('div');
+            notification.style.cssText = `
+                position: fixed;
+                top: 80px;
+                right: 20px;
+                background: linear-gradient(45deg, #48c6ef, #6f86d6);
+                color: white;
+                padding: 1rem 1.5rem;
+                border-radius: 10px;
+                box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+                z-index: 10000;
+                animation: slideIn 0.3s ease;
+                font-weight: 600;
+            `;
+            notification.innerHTML = `
+                <i class="bi bi-cpu"></i> 
+                Switched to ${modelNames[model] || model}
+            `;
+            
+            document.body.appendChild(notification);
+            
+            setTimeout(() => {
+                notification.style.animation = 'slideOut 0.3s ease';
+                setTimeout(() => notification.remove(), 300);
+            }, 2000);
+        }
+        
+        // Export function to get current model
+        window.getCurrentLLMModel = function() {
+            return localStorage.getItem(LLM_STORAGE_KEY) || 'gpt-4o-mini';
+        };
+    </script>
+    
+    <style>
+        @keyframes slideIn {
+            from {
+                transform: translateX(400px);
+                opacity: 0;
+            }
+            to {
+                transform: translateX(0);
+                opacity: 1;
+            }
+        }
+        
+        @keyframes slideOut {
+            from {
+                transform: translateX(0);
+                opacity: 1;
+            }
+            to {
+                transform: translateX(400px);
+                opacity: 0;
+            }
+        }
+    </style>
+    
     <script src="/static/js/chat.js" type="module"></script>
 </body>
 </html>

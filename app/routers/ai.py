@@ -38,6 +38,11 @@ class ChatRequest(BaseModel):
         description="Optional conversation ID for context",
         example="conv_abc123"
     )
+    model: Optional[str] = Field(
+        "gpt-4o-mini",
+        description="LLM model to use",
+        example="gpt-4o-mini"
+    )
     
     class Config:
         json_schema_extra = {
@@ -197,8 +202,53 @@ async def chat_with_ai(
     ```
     """
     try:
-        # Create AI agent for this user
-        agent = AiChatagent(current_user, llm)
+        # Get the selected model
+        from llm_manager import LLMManager
+        selected_model = request.model or "gpt-4o-mini"
+        
+        # Determine provider and handle local models
+        if "lm-studio" in selected_model.lower():
+            provider = "lm_studio"
+            # LM Studio default endpoint
+            model_llm = LLMManager.get_llm(
+                provider=provider,
+                model="local-model",  # LM Studio auto-detects
+                temperature=current_user.temperature or 0.7,
+                base_url="http://localhost:1234/v1"  # Default LM Studio port
+            )
+        elif "ollama" in selected_model.lower():
+            provider = "ollama"
+            # Ollama default endpoint
+            model_llm = LLMManager.get_llm(
+                provider=provider,
+                model="llama2",  # Default Ollama model
+                temperature=current_user.temperature or 0.7,
+                base_url="http://localhost:11434"  # Default Ollama port
+            )
+        elif "claude" in selected_model.lower():
+            provider = "claude"
+            model_llm = LLMManager.get_llm(
+                provider=provider,
+                model=selected_model,
+                temperature=current_user.temperature or 0.7
+            )
+        elif "gemini" in selected_model.lower():
+            provider = "gemini"
+            model_llm = LLMManager.get_llm(
+                provider=provider,
+                model=selected_model,
+                temperature=current_user.temperature or 0.7
+            )
+        else:
+            provider = "openai"
+            model_llm = LLMManager.get_llm(
+                provider=provider,
+                model=selected_model,
+                temperature=current_user.temperature or 0.7
+            )
+        
+        # Create AI agent for this user with selected model
+        agent = AiChatagent(current_user, model_llm)
         
         # Generate request ID for tracing
         request_id = ote_logger.generate_request_id()
