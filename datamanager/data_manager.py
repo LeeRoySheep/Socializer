@@ -715,7 +715,9 @@ class DataManager:
 
     def get_user_rooms(self, user_id: int) -> List[ChatRoom]:
         """
-        Get all rooms where user is a member.
+        Get all rooms accessible to user:
+        - Rooms where user is a member (private/hidden)
+        - All public rooms (discoverable by everyone)
         
         Args:
             user_id (int): User ID
@@ -725,7 +727,8 @@ class DataManager:
         """
         with self.get_session() as session:
             try:
-                rooms = (
+                # Get rooms where user is a member
+                member_rooms = (
                     session.query(ChatRoom)
                     .join(RoomMember)
                     .filter(
@@ -733,15 +736,37 @@ class DataManager:
                         RoomMember.is_active == True,
                         ChatRoom.is_active == True
                     )
-                    .order_by(ChatRoom.created_at.desc())
                     .all()
                 )
-                # Make objects accessible outside session
-                for room in rooms:
-                    session.expunge(room)
-                return rooms
+                
+                # Get all public rooms (discoverable by everyone)
+                public_rooms = (
+                    session.query(ChatRoom)
+                    .filter(
+                        ChatRoom.is_public == True,
+                        ChatRoom.is_active == True
+                    )
+                    .all()
+                )
+                
+                # Combine and deduplicate (user might be member of public room)
+                room_ids = set()
+                all_rooms = []
+                
+                for room in member_rooms + public_rooms:
+                    if room.id not in room_ids:
+                        room_ids.add(room.id)
+                        session.expunge(room)
+                        all_rooms.append(room)
+                
+                # Sort by created_at descending
+                all_rooms.sort(key=lambda r: r.created_at, reverse=True)
+                
+                print(f"[TRACE] get_user_rooms: user_id={user_id}, member_rooms={len(member_rooms)}, public_rooms={len(public_rooms)}, total={len(all_rooms)}")
+                
+                return all_rooms
             except Exception as e:
-                print(f"Error getting user rooms: {e}")
+                print(f"[ERROR] get_user_rooms: {e}")
                 return []
 
     def invite_user_to_room(

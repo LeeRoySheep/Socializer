@@ -607,32 +607,37 @@ function handlePassiveListening(event) {
 }
 
 function toggleAIAssistant() {
-    isAIActive = !isAIActive;
+    // IMPORTANT: AI monitoring is MANDATORY and cannot be disabled
+    // This ensures consistent empathy monitoring and communication quality
+    console.log('[AI] Toggle clicked, but AI is mandatory (always on)');
+    
+    displaySystemMessage(
+        '🤖 AI monitoring is always active to ensure empathy, cultural sensitivity, and communication quality. This cannot be disabled.',
+        'info-message'
+    );
+    
+    // Ensure it stays on
+    isAIActive = true;
+    isListening = true;
+    
     const toggleBtn = document.getElementById('ai-toggle');
-    const toggleText = toggleBtn.querySelector('.ai-toggle-text');
+    const toggleText = toggleBtn?.querySelector('.ai-toggle-text');
     const listeningIndicator = document.getElementById('ai-listening-indicator');
     
-    if (isAIActive) {
+    if (toggleBtn) {
         toggleBtn.classList.add('active');
-        toggleText.textContent = 'AI On';
-        listeningIndicator.classList.add('active');
-        isListening = true;
-        displaySystemMessage('🤖 AI Assistant activated! I\'m passively listening. Type normally or use /ai for direct questions.', 'info-message');
-        localStorage.setItem('aiAssistantEnabled', 'true');
-        
-        // Start passive listening
-        startPassiveListening();
-    } else {
-        toggleBtn.classList.remove('active');
-        toggleText.textContent = 'AI Off';
-        listeningIndicator.classList.remove('active');
-        isListening = false;
-        displaySystemMessage('AI Assistant deactivated.', 'info-message');
-        localStorage.setItem('aiAssistantEnabled', 'false');
-        
-        // Stop passive listening
-        stopPassiveListening();
+        toggleBtn.disabled = true;
     }
+    if (toggleText) {
+        toggleText.textContent = 'AI On';
+    }
+    if (listeningIndicator) {
+        listeningIndicator.classList.add('active');
+    }
+    
+    // Ensure passive listening is active
+    startPassiveListening();
+    localStorage.setItem('aiAssistantEnabled', 'true');
 }
 
 function showAITypingIndicator() {
@@ -1587,29 +1592,31 @@ async function initialize() {
         
         await setupEventListeners();
         
-        // Restore AI assistant state from localStorage
-        const aiEnabled = localStorage.getItem('aiAssistantEnabled') === 'true';
-        if (aiEnabled) {
-            console.log('🤖 Restoring AI assistant state');
-            const toggleBtn = document.getElementById('ai-toggle');
-            const toggleText = toggleBtn?.querySelector('.ai-toggle-text');
-            const listeningIndicator = document.getElementById('ai-listening-indicator');
+        // IMPORTANT: AI monitoring is ALWAYS enabled (mandatory for empathy monitoring)
+        console.log('🤖 AI monitoring ALWAYS ACTIVE (mandatory)');
+        const toggleBtn = document.getElementById('ai-toggle');
+        const toggleText = toggleBtn?.querySelector('.ai-toggle-text');
+        const listeningIndicator = document.getElementById('ai-listening-indicator');
+        
+        // Force AI to be always on
+        isAIActive = true;
+        isListening = true;
+        
+        if (toggleBtn && toggleText) {
+            toggleBtn.classList.add('active');
+            toggleBtn.disabled = true;  // Disable toggle - AI is mandatory
+            toggleBtn.title = 'AI monitoring is always active';
+            toggleText.textContent = 'AI On';
             
-            if (toggleBtn && toggleText) {
-                isAIActive = true;
-                isListening = true;
-                toggleBtn.classList.add('active');
-                toggleText.textContent = 'AI On';
-                
-                if (listeningIndicator) {
-                    listeningIndicator.classList.add('active');
-                }
-                
-                // Start passive listening
-                startPassiveListening();
-                console.log('🤖 Passive listening enabled');
+            if (listeningIndicator) {
+                listeningIndicator.classList.add('active');
             }
         }
+        
+        // Start passive listening (always)
+        startPassiveListening();
+        localStorage.setItem('aiAssistantEnabled', 'true');  // Force true
+        console.log('🤖 AI passive listening enabled (mandatory for all users)');
         
         await initWebSocket();
         console.log('Chat application initialized successfully');

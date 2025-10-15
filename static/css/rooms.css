@@ -172,6 +172,26 @@
     color: rgba(255, 255, 255, 0.8);
 }
 
+/* Join Room Button */
+.join-room-btn {
+    transition: all 0.2s;
+    padding: 0.25rem 0.75rem;
+    font-size: 0.85rem;
+    margin-left: auto;
+    flex-shrink: 0;
+    font-weight: 500;
+}
+
+.join-room-btn:hover {
+    background: #198754 !important;
+    border-color: #198754 !important;
+    transform: scale(1.05);
+}
+
+.join-room-btn:active {
+    transform: scale(0.95);
+}
+
 /* Delete Room Button */
 .delete-room-btn {
     opacity: 0;
@@ -194,6 +214,28 @@
 
 .delete-room-btn:active {
     transform: scale(0.95);
+}
+
+/* Refresh Button */
+#refresh-rooms-btn {
+    transition: transform 0.3s ease;
+}
+
+#refresh-rooms-btn:hover {
+    transform: scale(1.1);
+}
+
+#refresh-rooms-btn.rotating {
+    animation: spin 0.5s linear;
+}
+
+@keyframes spin {
+    from {
+        transform: rotate(0deg);
+    }
+    to {
+        transform: rotate(360deg);
+    }
 }
 
 /* Room Chat Area */

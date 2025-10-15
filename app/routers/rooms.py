@@ -43,6 +43,7 @@ class RoomResponse(BaseModel):
     member_count: int
     has_password: bool = False
     is_public: bool = False
+    is_member: bool = False  # Is current user a member?
     
     class Config:
         from_attributes = True
@@ -193,9 +194,11 @@ async def create_room(
 @router.get("/", response_model=List[RoomResponse])
 async def get_my_rooms(current_user: User = Depends(get_current_user)):
     """
-    Get all rooms where current user is a member.
+    Get all rooms accessible to user:
+    - Rooms where user is a member
+    - All public/discoverable rooms
     
-    Returns list of rooms with member counts.
+    Returns list of rooms with member counts and membership status.
     """
     dm = get_dm()
     rooms = dm.get_user_rooms(current_user.id)
@@ -203,6 +206,10 @@ async def get_my_rooms(current_user: User = Depends(get_current_user)):
     response = []
     for room in rooms:
         members = dm.get_room_members(room.id)
+        
+        # Check if current user is a member
+        is_member = any(m.user_id == current_user.id and m.is_active for m in members)
+        
         response.append(RoomResponse(
             id=room.id,
             name=room.name,
@@ -213,7 +220,8 @@ async def get_my_rooms(current_user: User = Depends(get_current_user)):
             ai_enabled=room.ai_enabled,
             member_count=len(members),
             has_password=bool(room.password),
-            is_public=room.is_public
+            is_public=room.is_public,
+            is_member=is_member
         ))
     
     return response
@@ -282,6 +290,88 @@ async def delete_room(
         print(f"[TRACE] delete_room: room {room_id} deleted by user {current_user.id}", flush=True)
         
     return {"message": "Room deleted successfully"}
+
+
+class JoinRoomRequest(BaseModel):
+    """Request model for joining a room."""
+    password: Optional[str] = Field(None, description="Password if room is protected")
+
+
+@router.post("/{room_id}/join", status_code=status.HTTP_200_OK)
+async def join_public_room(
+    room_id: int,
+    request: JoinRoomRequest,
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Join a public room.
+    
+    Only works for public (is_public=True) rooms.
+    Password required if room has one.
+    User will be added as a member and can start chatting.
+    
+    OBSERVABILITY: Logs join attempts
+    TRACEABILITY: Tracks room_id, user_id
+    EVALUATION: Validates room is public and password (if required)
+    """
+    dm = get_dm()
+    
+    # Get room
+    room = dm.get_room(room_id)
+    if not room:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Room not found"
+        )
+    
+    # EVALUATION: Only public rooms can be joined without invite
+    if not room.is_public:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="This room is private (invite-only). You need an invite to join."
+        )
+    
+    # EVALUATION: Check password if room is protected
+    if room.password:
+        if not request.password:
+            print(f"[EVAL] join_public_room: password required but not provided, room_id={room_id}")
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="This room is password-protected. Please provide the password."
+            )
+        
+        if request.password != room.password:
+            print(f"[EVAL] join_public_room: incorrect password, room_id={room_id}, user_id={current_user.id}")
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Incorrect password. Please try again."
+            )
+        
+        print(f"[TRACE] join_public_room: password validated for room {room_id}")
+    
+    # Check if already a member
+    members = dm.get_room_members(room_id)
+    is_member = any(m.user_id == current_user.id and m.is_active for m in members)
+    
+    if is_member:
+        print(f"[TRACE] join_public_room: user {current_user.id} already member of room {room_id}")
+        return {"message": "You are already a member of this room"}
+    
+    # Add user as member
+    with dm.get_session() as session:
+        from datamanager.data_model import RoomMember
+        
+        new_member = RoomMember(
+            room_id=room_id,
+            user_id=current_user.id,
+            role='member'
+        )
+        session.add(new_member)
+        session.commit()
+        
+        print(f"[TRACE] join_public_room: user {current_user.id} joined public room {room_id}")
+    
+    return {"message": f"Successfully joined {room.name or 'the room'}"}
 
 
 @router.post("/{room_id}/leave", status_code=status.HTTP_200_OK)

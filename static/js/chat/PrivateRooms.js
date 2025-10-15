@@ -39,7 +39,8 @@ class PrivateRoomsManager {
                 passwordInputGroup: document.getElementById('password-input-group'),
                 invitesList: document.getElementById('invites-list'),
                 invitesHeader: document.getElementById('invites-header'),
-                backToMainBtn: document.getElementById('back-to-main-btn')
+                backToMainBtn: document.getElementById('back-to-main-btn'),
+                refreshRoomsBtn: document.getElementById('refresh-rooms-btn')
             };
 
             // Setup modal
@@ -52,13 +53,14 @@ class PrivateRoomsManager {
             await this.loadRooms();
             await this.loadPendingInvites();
             
-            // Auto-refresh every 30 seconds
-            setInterval(() => {
+            // Auto-refresh every 15 seconds to discover new public rooms
+            this.refreshInterval = setInterval(() => {
+                console.log('[TRACE] Auto-refreshing rooms and invites...');
                 this.loadRooms();
                 this.loadPendingInvites();
-            }, 30000);
+            }, 15000);  // Reduced from 30s to 15s for better UX
 
-            console.log('[TRACE] PrivateRoomsManager.init: complete');
+            console.log('[TRACE] PrivateRoomsManager.init: complete (auto-refresh every 15s)');
         } catch (error) {
             console.error('[ERROR] PrivateRoomsManager.init failed:', error);
         }
@@ -92,6 +94,19 @@ class PrivateRoomsManager {
                 const isChecked = e.target.checked;
                 this.elements.passwordInputGroup.style.display = isChecked ? 'block' : 'none';
                 console.log('[TRACE] Password protection toggled:', isChecked);
+            });
+        }
+        
+        // Refresh rooms button
+        if (this.elements.refreshRoomsBtn) {
+            this.elements.refreshRoomsBtn.addEventListener('click', async () => {
+                console.log('[TRACE] Manual refresh requested');
+                this.elements.refreshRoomsBtn.classList.add('rotating');
+                await this.loadRooms();
+                await this.loadPendingInvites();
+                setTimeout(() => {
+                    this.elements.refreshRoomsBtn.classList.remove('rotating');
+                }, 500);
             });
         }
         
@@ -381,6 +396,9 @@ class PrivateRoomsManager {
         const currentUserId = window.currentUser?.id;
         const isCreator = room.creator_id === currentUserId;
 
+        // Show Join button for public rooms user isn't a member of
+        const showJoinBtn = room.is_public && !room.is_member;
+        
         div.innerHTML = `
             <div class="room-icon">${icon}</div>
             <div class="room-details">
@@ -390,9 +408,11 @@ class PrivateRoomsManager {
                     ${room.has_password ? '<span title="Password protected"><i class="bi bi-lock"></i></span>' : ''}
                     ${room.is_public ? '<span title="Public (discoverable)"><i class="bi bi-eye"></i></span>' : '<span title="Hidden (invite-only)"><i class="bi bi-eye-slash"></i></span>'}
                     ${room.ai_enabled ? '<span title="AI monitoring active"><i class="bi bi-robot"></i></span>' : ''}
+                    ${!room.is_member ? '<span class="badge bg-info">Not Joined</span>' : ''}
                 </div>
             </div>
-            ${isCreator ? '<button class="btn btn-sm btn-danger delete-room-btn" data-room-id="' + room.id + '" title="Delete room"><i class="bi bi-trash"></i></button>' : ''}
+            ${showJoinBtn ? '<button class="btn btn-sm btn-success join-room-btn" data-room-id="' + room.id + '" title="Join room"><i class="bi bi-plus-circle"></i> Join</button>' : ''}
+            ${isCreator && room.is_member ? '<button class="btn btn-sm btn-danger delete-room-btn" data-room-id="' + room.id + '" title="Delete room"><i class="bi bi-trash"></i></button>' : ''}
         `;
 
         // Click handler for room selection
@@ -402,8 +422,17 @@ class PrivateRoomsManager {
             this.selectRoom(room);
         });
 
+        // Join button handler (if public and not a member)
+        if (showJoinBtn) {
+            const joinBtn = div.querySelector('.join-room-btn');
+            joinBtn.addEventListener('click', async (e) => {
+                e.stopPropagation();  // Don't trigger room selection
+                await this.joinRoom(room.id, room.name, room.has_password);
+            });
+        }
+
         // Delete button handler (if creator)
-        if (isCreator) {
+        if (isCreator && room.is_member) {
             const deleteBtn = div.querySelector('.delete-room-btn');
             deleteBtn.addEventListener('click', async (e) => {
                 e.stopPropagation();  // Don't trigger room selection
@@ -416,9 +445,22 @@ class PrivateRoomsManager {
 
     /**
      * Select a room
+     * 
+     * EVALUATION: Check if user is a member before allowing access
      */
     selectRoom(room) {
-        console.log('[TRACE] selectRoom:', { room_id: room.id });
+        console.log('[TRACE] selectRoom:', { room_id: room.id, is_member: room.is_member });
+
+        // EVALUATION: User must be a member to view messages
+        if (!room.is_member) {
+            console.log('[EVAL] selectRoom: user not a member of room', { room_id: room.id });
+            
+            // Show message
+            this.showError(`You must join "${room.name || 'this room'}" to view messages. Click the Join button.`);
+            
+            // Don't select the room - stay on current view
+            return;
+        }
 
         // Update active state
         this.activeRoomId = room.id;
@@ -617,6 +659,99 @@ class PrivateRoomsManager {
             console.log('[TRACE] sendInvites: success');
         } catch (error) {
             console.error('[ERROR] sendInvites failed:', error);
+        }
+    }
+
+    /**
+     * Join a public room
+     * 
+     * OBSERVABILITY: Logs join attempts
+     * TRACEABILITY: Tracks room_id, user_id
+     * EVALUATION: Confirms successful join, handles password
+     */
+    async joinRoom(roomId, roomName, hasPassword = false, password = null) {
+        console.log('[TRACE] joinRoom:', { room_id: roomId, name: roomName, has_password: hasPassword });
+        
+        // If room has password and not provided, prompt user
+        if (hasPassword && !password) {
+            password = prompt(`Enter password for "${roomName}":`);
+            if (!password) {
+                console.log('[EVAL] joinRoom: password prompt cancelled by user');
+                return;
+            }
+        }
+        
+        try {
+            const token = this.getToken();
+            const body = hasPassword ? { password } : {};
+            
+            const response = await fetch(`${this.apiBaseUrl}/${roomId}/join`, {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(body)
+            });
+            
+            if (!response.ok) {
+                const error = await response.json();
+                
+                // If password incorrect, allow retry
+                if (response.status === 401 && error.detail.includes('password')) {
+                    console.log('[EVAL] joinRoom: incorrect password, prompting retry');
+                    this.showError(error.detail);
+                    
+                    // Ask if user wants to retry
+                    if (confirm('Incorrect password. Try again?')) {
+                        return await this.joinRoom(roomId, roomName, hasPassword, null);
+                    }
+                    return;
+                }
+                
+                throw new Error(error.detail || 'Failed to join room');
+            }
+            
+            console.log('[TRACE] joinRoom: success');
+            
+            // IMMEDIATE UPDATE: Update is_member locally before reload
+            const roomBeforeReload = this.rooms.find(r => r.id === roomId);
+            if (roomBeforeReload) {
+                roomBeforeReload.is_member = true;
+                console.log('[TRACE] joinRoom: updated is_member locally before reload');
+            }
+            
+            this.showSuccess(`Joined "${roomName}" successfully!`);
+            
+            // Reload rooms list to get full updated data from server
+            await this.loadRooms();
+            
+            // Find the updated room
+            const updatedRoom = this.rooms.find(r => r.id === roomId);
+            if (updatedRoom) {
+                console.log('[TRACE] joinRoom: room found after reload', { 
+                    room_id: updatedRoom.id, 
+                    is_member: updatedRoom.is_member 
+                });
+                
+                // Ensure is_member is true (belt and suspenders)
+                updatedRoom.is_member = true;
+                
+                // Auto-select the newly joined room
+                this.selectRoom(updatedRoom);
+            } else {
+                console.error('[ERROR] joinRoom: room not found after reload', { room_id: roomId });
+                
+                // Fallback: Try to select the room we updated locally
+                if (roomBeforeReload) {
+                    console.log('[TRACE] joinRoom: using fallback room object');
+                    this.selectRoom(roomBeforeReload);
+                }
+            }
+            
+        } catch (error) {
+            console.error('[ERROR] joinRoom failed:', error);
+            this.showError(error.message || 'Failed to join room');
         }
     }
 
