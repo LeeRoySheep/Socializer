@@ -307,7 +307,7 @@ class DataManager:
                     print(f"User with ID {user_id} not found.")
                     return None
 
-                # Extract only content and role from messages
+                # Extract content, role, and metadata from messages
                 serializable_messages = []
                 for msg in messages:
                     if hasattr(msg, "dict"):  # For Pydantic models
@@ -318,11 +318,22 @@ class DataManager:
                         print(f"Skipping invalid message format: {msg}")
                         continue  # Skip invalid message formats
                     
-                    # Only keep content and role
+                    # Keep content, role, and useful metadata
                     filtered_msg = {
                         'content': str(msg_dict.get('content', '')),  # Ensure content is string
                         'role': str(msg_dict.get('role', 'user'))  # Default to 'user' if role not specified
                     }
+                    
+                    # Add optional metadata if present
+                    if 'type' in msg_dict:
+                        filtered_msg['type'] = msg_dict['type']  # "ai" or "chat"
+                    if 'room_id' in msg_dict:
+                        filtered_msg['room_id'] = msg_dict['room_id']
+                    if 'timestamp' in msg_dict:
+                        filtered_msg['timestamp'] = msg_dict['timestamp']
+                    if 'tools_used' in msg_dict:
+                        filtered_msg['tools_used'] = msg_dict['tools_used']
+                    
                     serializable_messages.append(filtered_msg)
 
                 if not serializable_messages:

@@ -93,8 +93,9 @@ class ConversationRecallTool(BaseTool):
     
     name: str = "recall_last_conversation"
     description: str = (
-        "Use this tool to recall the last conversation from memory. "
-        "Use this when the user asks about previous conversations or context. "
+        "Use this tool to recall the user's conversation history from memory. "
+        "This includes both AI conversations and general chat messages where the user participated. "
+        "Use this when the user asks about previous conversations, context, or what they discussed. "
         "Input should be a user_id."
     )
     args_schema: Type[BaseModel] = ConversationRecallInput
@@ -277,12 +278,21 @@ class ConversationRecallTool(BaseTool):
                 if not isinstance(messages, list):
                     messages = []
 
-                # Return the last 5 messages to keep context manageable
+                # Return the last 10 messages to include both AI and chat history
+                last_messages = messages[-10:] if len(messages) > 10 else messages
+                
+                # Count message types for context
+                ai_count = sum(1 for msg in last_messages if isinstance(msg, dict) and msg.get('type') == 'ai')
+                chat_count = sum(1 for msg in last_messages if isinstance(msg, dict) and msg.get('type') == 'chat')
+                
                 return json.dumps({
                     "status": "success",
                     "message": "Conversation retrieved successfully",
-                    "data": messages[-5:],  # Last 5 messages
+                    "data": last_messages,
                     "total_messages": len(messages),
+                    "returned_messages": len(last_messages),
+                    "ai_messages": ai_count,
+                    "chat_messages": chat_count
                 })
 
             except json.JSONDecodeError as e:

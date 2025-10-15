@@ -425,6 +425,28 @@ async def handle_client_message(
             
             # Get username from cached connection info (no DB query!)
             username = get_username_from_connection(client_id, user_id)
+            
+            # Save the user's chat message to their conversation history
+            try:
+                from datamanager.data_manager import DataManager
+                from app.config import SQLALCHEMY_DATABASE_URL
+                
+                db_path = SQLALCHEMY_DATABASE_URL.replace('sqlite:///', '')
+                dm = DataManager(db_path)
+                
+                # Save message with metadata to distinguish it from AI conversations
+                dm.save_messages(int(user_id), [
+                    {
+                        "role": "user",
+                        "content": text,
+                        "type": "chat",  # Mark as general chat (not AI)
+                        "room_id": room_id,
+                        "timestamp": datetime.utcnow().isoformat()
+                    }
+                ])
+            except Exception as save_error:
+                logger.error(f"Error saving chat message for user {user_id}: {save_error}")
+                # Don't fail the chat if saving fails
                 
             # Broadcast the message to all connected clients in the room
             chat_message = {

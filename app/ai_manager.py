@@ -109,10 +109,22 @@ class AIAgentManager:
                                 if tool_name and tool_name not in tools_used:
                                     tools_used.append(tool_name)
                 
-                # Save the conversation to database
+                # Save the conversation to database with metadata
+                from datetime import datetime
                 dm.save_messages(user_id, [
-                    {"role": "user", "content": message},
-                    {"role": "assistant", "content": response_text}
+                    {
+                        "role": "user", 
+                        "content": message,
+                        "type": "ai",  # Mark as AI conversation
+                        "timestamp": datetime.utcnow().isoformat()
+                    },
+                    {
+                        "role": "assistant", 
+                        "content": response_text,
+                        "type": "ai",  # Mark as AI conversation
+                        "tools_used": tools_used,
+                        "timestamp": datetime.utcnow().isoformat()
+                    }
                 ])
                 
                 return {
