@@ -484,6 +484,132 @@ class DataModel:
             yield db
         finally:
             db.close()
+    
+    def get_user_preferences(self, user_id: int, preference_type: Optional[str] = None) -> dict:
+        """
+        Get user preferences from database.
+        
+        Args:
+            user_id: ID of the user
+            preference_type: Optional filter by preference type
+            
+        Returns:
+            Dictionary mapping "type.key" to value (extracted from JSON)
+        """
+        db = self.SessionLocal()
+        try:
+            query = db.query(UserPreference).filter(UserPreference.user_id == user_id)
+            
+            if preference_type:
+                query = query.filter(UserPreference.preference_type == preference_type)
+            
+            preferences = query.all()
+            
+            # Return as dict: "type.key" -> value
+            result = {}
+            for pref in preferences:
+                key = f"{pref.preference_type}.{pref.preference_key}"
+                # Extract value from JSON format
+                if isinstance(pref.preference_value, dict) and "value" in pref.preference_value:
+                    result[key] = pref.preference_value["value"]
+                else:
+                    result[key] = pref.preference_value
+            
+            return result
+        finally:
+            db.close()
+    
+    def set_user_preference(self, user_id: int, preference_type: str, 
+                           preference_key: str, preference_value: Any, 
+                           confidence: float = 1.0) -> bool:
+        """
+        Set a user preference in database.
+        
+        Args:
+            user_id: ID of the user
+            preference_type: Type of preference (e.g., 'personal_info', 'interests')
+            preference_key: Key for the preference
+            preference_value: Value to store (will be stored as JSON)
+            confidence: Confidence score for this preference (0-1)
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        db = self.SessionLocal()
+        try:
+            # Convert value to dict if it's a string (for JSON storage)
+            if isinstance(preference_value, str):
+                json_value = {"value": preference_value}
+            elif isinstance(preference_value, dict):
+                json_value = preference_value
+            else:
+                json_value = {"value": str(preference_value)}
+            
+            # Check if preference already exists
+            existing = db.query(UserPreference).filter(
+                UserPreference.user_id == user_id,
+                UserPreference.preference_type == preference_type,
+                UserPreference.preference_key == preference_key
+            ).first()
+            
+            if existing:
+                # Update existing
+                existing.preference_value = json_value
+                existing.confidence = confidence
+            else:
+                # Create new
+                new_pref = UserPreference(
+                    user_id=user_id,
+                    preference_type=preference_type,
+                    preference_key=preference_key,
+                    preference_value=json_value,
+                    confidence=confidence
+                )
+                db.add(new_pref)
+            
+            db.commit()
+            return True
+        except Exception as e:
+            db.rollback()
+            print(f"Error setting user preference: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
+        finally:
+            db.close()
+    
+    def delete_user_preference(self, user_id: int, preference_type: str, 
+                              preference_key: str) -> bool:
+        """
+        Delete a user preference from database.
+        
+        Args:
+            user_id: ID of the user
+            preference_type: Type of preference
+            preference_key: Key for the preference
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        db = self.SessionLocal()
+        try:
+            preference = db.query(UserPreference).filter(
+                UserPreference.user_id == user_id,
+                UserPreference.preference_type == preference_type,
+                UserPreference.preference_key == preference_key
+            ).first()
+            
+            if preference:
+                db.delete(preference)
+                db.commit()
+                return True
+            return False
+        except Exception as e:
+            db.rollback()
+            print(f"Error deleting user preference: {e}")
+            return False
+        finally:
+            db.close()
 
 
 if __name__ == "__main__":
