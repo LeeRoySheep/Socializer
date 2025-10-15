@@ -982,8 +982,9 @@ class AiChatagent:
         # Remove any None values from tool_instances
         self.tool_instances = {k: v for k, v in self.tool_instances.items() if v is not None}
         
-        # Bind tools to the language model
-        self.llm_with_tools = llm.bind_tools(self.tools)
+        # ✅ FIX: Bind actual tool instances (BaseTool objects) to LLM, not dictionaries!
+        tool_list = list(self.tool_instances.values())
+        self.llm_with_tools = llm.bind_tools(tool_list)
 
     def get_conversation_history(self) -> List[Dict[str, Any]]:
         """Retrieve the conversation history for this agent."""

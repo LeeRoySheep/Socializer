@@ -20,13 +20,14 @@ class ConnectionManager:
         self.connection_info: Dict[str, Dict[str, Any]] = {}  # Additional connection metadata
         self._lock = asyncio.Lock()
 
-    async def connect(self, websocket: WebSocket, client_id: str, user_id: Optional[str] = None):
+    async def connect(self, websocket: WebSocket, client_id: str, user_id: Optional[str] = None, username: Optional[str] = None):
         """Accept a new WebSocket connection.
         
         Args:
             websocket: The WebSocket connection to accept
             client_id: A unique identifier for the client
             user_id: Optional user ID if the user is authenticated
+            username: Optional username if the user is authenticated
             
         Returns:
             bool: True if connection was successful, False otherwise
@@ -40,6 +41,7 @@ class ConnectionManager:
                 self.active_connections[client_id] = websocket
                 self.connection_info[client_id] = {
                     'user_id': user_id,
+                    'username': username,  # Store username to avoid repeated DB queries
                     'connected_at': asyncio.get_event_loop().time(),
                     'last_active': asyncio.get_event_loop().time(),
                     'state': WebSocketState.CONNECTED
@@ -50,7 +52,7 @@ class ConnectionManager:
                         self.user_connections[user_id] = []
                     self.user_connections[user_id].append(websocket)
             
-            logger.info(f"New WebSocket connection: {client_id} (User: {user_id or 'unauthenticated'})")
+            logger.info(f"New WebSocket connection: {client_id} (User: {username or user_id or 'unauthenticated'})")
             return True
             
         except Exception as e:

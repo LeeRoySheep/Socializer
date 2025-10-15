@@ -6,10 +6,7 @@ from sqlalchemy.orm import Session
 from jose import JWTError, jwt
 from datamanager.data_model import User
 from app.database import get_db
-
-# JWT settings (must match main.py)
-SECRET_KEY = "your-secret-key-here"  # Change this to a secure secret key in production
-ALGORITHM = "HS256"
+from app.config import SECRET_KEY, ALGORITHM
 
 def get_current_user_websocket(token: str, db: Session) -> Optional[User]:
     """

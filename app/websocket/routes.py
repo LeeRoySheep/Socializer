@@ -26,15 +26,8 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-# For testing purposes, we'll use a simple user mapping
-TEST_USERS = {
-    'user1': {'username': 'Alice', 'is_active': True},
-    'user2': {'username': 'Bob', 'is_active': True},
-    'user3': {'username': 'Charlie', 'is_active': True}
-}
-
 async def get_user_info(token: str) -> Dict[str, Any]:
-    """Get user information from JWT token.
+    """Get user information from JWT token and fetch from database.
     
     Args:
         token: JWT token from the client
@@ -56,20 +49,27 @@ async def get_user_info(token: str) -> Dict[str, Any]:
                 headers={"WWW-Authenticate": "Bearer"},
             )
             
-        # In a real app, you would fetch the user from the database
-        # For now, we'll use our test users
-        user = TEST_USERS.get(username)
-        if not user:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="User not found",
-            )
+        # Fetch the user from the database
+        from app.database import get_db
+        from app.models import User
+        from sqlalchemy.orm import Session
+        
+        db: Session = next(get_db())
+        try:
+            user = db.query(User).filter(User.username == username).first()
+            if not user:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="User not found in database",
+                )
             
-        return {
-            "user_id": username,
-            "username": user["username"],
-            "is_active": user["is_active"]
-        }
+            return {
+                "user_id": user.id,  # Actual numeric ID from database
+                "username": user.username,  # Actual username from database
+                "is_active": user.is_active
+            }
+        finally:
+            db.close()
         
     except jwt.ExpiredSignatureError:
         raise HTTPException(
@@ -140,7 +140,7 @@ async def websocket_chat_endpoint(
             return
         
         # Add the connection to the manager
-        if not await manager.connect(websocket, client_id, user_info['user_id']):
+        if not await manager.connect(websocket, client_id, user_info['user_id'], user_info['username']):
             logger.error(f"Failed to add connection {client_id} to manager")
             await websocket.close(code=status.WS_1011_INTERNAL_ERROR, reason="Server error")
             return
@@ -263,7 +263,7 @@ async def websocket_chat_endpoint(
             return
         
         # Add the connection to the manager
-        if not await manager.connect(websocket, client_id, user_info['user_id']):
+        if not await manager.connect(websocket, client_id, user_info['user_id'], user_info['username']):
             logger.error(f"Failed to add connection {client_id} to manager")
             await websocket.close(code=status.WS_1011_INTERNAL_ERROR, reason="Server error")
             return
@@ -274,7 +274,7 @@ async def websocket_chat_endpoint(
             # Send welcome message
             welcome_msg = {
                 "type": "system",
-                "message": f'Welcome to the chat, {user_info["user_id"]}!',
+                "message": f'Welcome to the chat, {user_info["username"]}!',
                 "timestamp": datetime.utcnow().isoformat(),
                 "room_id": room_id
             }
@@ -284,7 +284,7 @@ async def websocket_chat_endpoint(
             join_notification = {
                 "type": "user_joined",
                 "user_id": user_info['user_id'],
-                "username": user_info['user_id'],  # Using user_id as username for now
+                "username": user_info['username'],  # Use actual username from database
                 "timestamp": datetime.utcnow().isoformat(),
                 "room_id": room_id
             }
@@ -350,7 +350,7 @@ async def websocket_chat_endpoint(
                 leave_notification = {
                     "type": "user_left",
                     "user_id": user_info['user_id'],
-                    "username": user_info['user_id'],
+                    "username": user_info['username'],  # Use actual username from database
                     "timestamp": datetime.utcnow().isoformat(),
                     "room_id": room_id
                 }
@@ -371,6 +371,22 @@ async def websocket_chat_endpoint(
             
         except Exception as cleanup_error:
             logger.error(f"Error during connection cleanup: {cleanup_error}", exc_info=True)
+
+def get_username_from_connection(client_id: str, user_id: str) -> str:
+    """Get username from cached connection info.
+    
+    Args:
+        client_id: The client connection ID
+        user_id: The user ID as fallback
+        
+    Returns:
+        The username from cache, or user_id if not found
+    """
+    if client_id in manager.connection_info:
+        username = manager.connection_info[client_id].get('username')
+        if username:
+            return username
+    return f"User_{user_id}"
 
 async def handle_client_message(
     websocket: WebSocket, 
@@ -406,11 +422,15 @@ async def handle_client_message(
             text = message.get("text", "")
             if not text.strip():
                 raise ValueError("Message text cannot be empty")
+            
+            # Get username from cached connection info (no DB query!)
+            username = get_username_from_connection(client_id, user_id)
                 
             # Broadcast the message to all connected clients in the room
             chat_message = {
                 "type": "chat",
-                "from": user_id,
+                "from": username,  # Use actual username instead of user_id
+                "user_id": user_id,  # Include ID for reference
                 "text": text,
                 "timestamp": datetime.utcnow().isoformat(),
                 "room_id": room_id
@@ -425,9 +445,13 @@ async def handle_client_message(
             # Handle typing indicator
             is_typing = message.get("is_typing", False)
             
+            # Get username from cached connection info (no DB query!)
+            username = get_username_from_connection(client_id, user_id)
+            
             typing_msg = {
                 "type": "typing",
                 "user_id": user_id,
+                "username": username,  # Add username
                 "is_typing": is_typing,
                 "timestamp": datetime.utcnow().isoformat(),
                 "room_id": room_id
@@ -480,37 +504,53 @@ async def send_online_users(
         # Get online users from the connection manager
         online_users = []
         
-        # Get a snapshot of user connections to avoid modification during iteration
-        user_connections_snapshot = {}
-        async with manager._lock:
-            user_connections_snapshot = manager.user_connections.copy()
+        # Get database session to fetch usernames
+        from app.database import get_db
+        from app.models import User
         
-        # Process each user's connections
-        for user_id, connections in user_connections_snapshot.items():
-            # Get active connections for this user
-            active_connections = [
-                conn for conn in connections 
-                if conn.client_state == WebSocketState.CONNECTED
-            ]
+        db = next(get_db())
+        try:
+            # Get a snapshot of user connections to avoid modification during iteration
+            user_connections_snapshot = {}
+            async with manager._lock:
+                user_connections_snapshot = manager.user_connections.copy()
             
-            if active_connections:
-                # Get the most recent activity time from all connections
-                last_active = 0
-                for conn in active_connections:
-                    for client_id, active_conn in manager.active_connections.items():
-                        if active_conn == conn and client_id in manager.connection_info:
-                            conn_info = manager.connection_info[client_id]
-                            last_active = max(last_active, conn_info.get('last_active', 0))
-                            break
+            # Process each user's connections
+            for user_id, connections in user_connections_snapshot.items():
+                # Get active connections for this user
+                active_connections = [
+                    conn for conn in connections 
+                    if conn.client_state == WebSocketState.CONNECTED
+                ]
                 
-                # Add user to online list
-                online_users.append({
-                    'user_id': user_id,
-                    'username': user_id,  # Using user_id as username for now
-                    'status': 'online',
-                    'last_active': datetime.fromtimestamp(last_active).isoformat() if last_active > 0 else None,
-                    'connection_count': len(active_connections)
-                })
+                if active_connections:
+                    # Fetch username from database
+                    # user_id is now a numeric ID, so we need to get the username
+                    user = db.query(User).filter(User.id == user_id).first()
+                    if not user:
+                        logger.warning(f"User with ID {user_id} not found in database")
+                        continue
+                    
+                    # Get the most recent activity time from all connections
+                    last_active = 0
+                    for conn in active_connections:
+                        for client_id, active_conn in manager.active_connections.items():
+                            if active_conn == conn and client_id in manager.connection_info:
+                                conn_info = manager.connection_info[client_id]
+                                last_active = max(last_active, conn_info.get('last_active', 0))
+                                break
+                    
+                    # Add user to online list with correct username
+                    online_users.append({
+                        'user_id': user_id,
+                        'id': user_id,  # Add 'id' for compatibility
+                        'username': user.username,  # Actual username from database
+                        'status': 'online',
+                        'last_active': datetime.fromtimestamp(last_active).isoformat() if last_active > 0 else None,
+                        'connection_count': len(active_connections)
+                    })
+        finally:
+            db.close()
         
         # Sort users by username (or user_id) for consistent ordering
         online_users.sort(key=lambda u: u['username'].lower())

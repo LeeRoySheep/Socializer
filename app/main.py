@@ -9,9 +9,9 @@ from datetime import datetime, date, timedelta
 from pathlib import Path
 from typing import Optional, List, Dict, Any, Union, Generator, Set
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
-from fastapi import FastAPI, Depends, HTTPException, status, Request, Response, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Depends, HTTPException, status, Request, Response, WebSocket, WebSocketDisconnect, Form
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
@@ -43,10 +43,8 @@ ai_manager = AIAgentManager()
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# JWT settings
-SECRET_KEY = "your-secret-key-here"  # Change this to a secure secret key in production
-ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 30
+# JWT settings - import from config (environment-based)
+from .config import SECRET_KEY, ALGORITHM, ACCESS_TOKEN_EXPIRE_MINUTES
 
 # Password hashing
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -230,11 +228,18 @@ app.add_middleware(
 app.include_router(websocket_router, prefix="/ws")
 
 # Include test runner router
-app.include_router(test_runner.router, prefix="/tests")
+app.include_router(test_runner.router, prefix="/tests", tags=["Testing"])
 
-# Include rooms router for private chat
+# Include chat router for /docs (WebSocket + REST API)
+from app.routers import chat
+app.include_router(chat.router, prefix="/api/chat", tags=["Chat API"])
+
+# Include rooms router for private chat management
 from app.routers import rooms
-app.include_router(rooms.router)
+app.include_router(rooms.router, prefix="/api/rooms", tags=["Private Rooms"])
+
+# Note: Auth endpoints are defined directly in main.py at /api/auth/
+# (lines ~1345, ~1505) to support both JSON API and HTML form submissions
 
 # WebSocket manager is already imported at the top
 # Initialize WebSocket manager with database session
@@ -281,17 +286,47 @@ class Token(BaseModel):
     access_token: str
     token_type: str
 
-class UserCreate(BaseModel):
-    """Model for user creation."""
-    username: str
-    email: str
-    password: str
+class LoginRequest(BaseModel):
+    """Model for login requests."""
+    username: str = Field(..., description="Username for authentication")
+    password: str = Field(..., description="User password")
     
     class Config:
-        from_attributes = True
-        json_encoders = {
-            datetime: lambda v: v.isoformat() if v else None,
-            date: lambda v: v.isoformat() if v else None
+        json_schema_extra = {
+            "example": {
+                "username": "john_doe",
+                "password": "securepass123"
+            }
+        }
+
+class UserCreateAPI(BaseModel):
+    """Model for user creation via API."""
+    username: str = Field(..., min_length=3, max_length=50, description="Unique username")
+    email: str = Field(..., description="User email address")
+    password: str = Field(..., min_length=8, description="Password (min 8 characters)")
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "username": "john_doe",
+                "email": "john@example.com",
+                "password": "securepass123"
+            }
+        }
+
+class RegisterResponse(BaseModel):
+    """Model for registration response."""
+    message: str
+    username: str
+    email: str
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "message": "User registered successfully",
+                "username": "john_doe",
+                "email": "john@example.com"
+            }
         }
 
 # Authentication routes
@@ -446,44 +481,7 @@ async def list_users(
 # New Chat Interface
 
 # Chat endpoints
-
-@app.get("/chat", response_class=HTMLResponse)
-async def chat_page(request: Request, current_user: User = Depends(get_current_active_user)):
-    """
-    Serve the chat interface.
-    """
-    try:
-        # Get the user's information
-        user_data = {
-            "id": current_user.id,
-            "username": current_user.username,
-            "email": getattr(current_user, 'hashed_email', ''),  # Using hashed_email as that's the field in the User model
-            "is_active": current_user.is_active,
-            "created_at": getattr(current_user, 'member_since', None)  # Using member_since instead of created_at
-        }
-        
-        # Get the token from the cookie
-        token = request.cookies.get("access_token")
-        if token and token.startswith("Bearer "):
-            token = token[7:]
-        
-        # Render the chat template with user data
-        return templates.TemplateResponse(
-            "new-chat.html",
-            {
-                "request": request,
-                "current_user": user_data,
-                "user": user_data,  # Keep for backward compatibility
-                "token": token,
-                "access_token": token  # Also pass as access_token
-            }
-        )
-    except Exception as e:
-        logger.error(f"Error loading chat page: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Error loading chat page"
-        )
+# NOTE: Main /chat endpoint is defined at line ~1241 with better authentication and error handling
 @app.post("/chat/", response_model=ChatResponse)
 async def chat(
     chat_data: ChatMessage,
@@ -829,15 +827,15 @@ async def websocket_endpoint(
             await websocket.close(code=4003)
             return
         
-        # Update user info with the one from the client
+        # Use username from database (authenticated user), not from client
         user_info = {
-            'username': auth_data.get('username', f'user-{user.id}'),
+            'username': user.username,  # ✅ Use database username, not client-provided
             'status': 'online',
             'last_seen': None
         }
         
         # Register the connection with the chat manager
-        await chat_manager.connect(websocket, client_id, str(user.id), user_info['username'])
+        await chat_manager.connect(websocket, client_id, str(user.id), user.username)
         
         # Join the default room
         await chat_manager.join_room(client_id, str(user.id), room_id)
@@ -1336,69 +1334,36 @@ async def chat_page(
 
 # UserCreate model is defined above with proper configuration
 
-@app.post("/api/auth/login")
+@app.post("/api/auth/login", tags=["Authentication"], response_model=Token)
 async def login(
-    request: Request,
+    login_data: LoginRequest,
     response: Response,
     db: Session = Depends(get_db)
 ):
     """
-    Login a user and return a JWT token in a cookie.
+    Login a user and return a JWT token.
     
-    Handles both JSON and form-encoded requests.
-    Returns:
-    - JSON response with token for API requests
-    - Redirect with cookies for form submissions
+    **Request Body:**
+    - **username**: Username for authentication
+    - **password**: User password
+    
+    **Returns:**
+    - **access_token**: JWT token for authenticated requests
+    - **token_type**: Token type (bearer)
     """
-    content_type = request.headers.get('content-type', '')
-    is_json = 'application/json' in content_type or content_type.startswith('application/json')
-    
     try:
-        # Parse request data
-        if is_json and not request.headers.get('content-type', '').startswith('multipart/form-data'):
-            try:
-                data = await request.json()
-                username = data.get('username')
-                password = data.get('password')
-            except json.JSONDecodeError:
-                return JSONResponse(
-                    status_code=400,
-                    content={"detail": "Invalid JSON format"}
-                )
-        else:
-            form_data = await request.form()
-            username = form_data.get('username')
-            password = form_data.get('password')
+        username = login_data.username
+        password = login_data.password
         
         print(f"[DEBUG] Login attempt for user: {username}")
-        
-        # Validate input
-        if not username or not password:
-            error_msg = "Username and password are required"
-            print(f"[DEBUG] {error_msg}")
-            if is_json:
-                return JSONResponse(
-                    status_code=400,
-                    content={"detail": error_msg}
-                )
-            return RedirectResponse(
-                url=f"/login?error={error_msg.replace(' ', '+')}",
-                status_code=303
-            )
         
         # Authenticate user
         user = db.query(User).filter(User.username == username).first()
         if not user or not verify_password(password, user.hashed_password):
-            error_msg = "Incorrect username or password"
-            print(f"[DEBUG] {error_msg} for user: {username}")
-            if is_json:
-                return JSONResponse(
-                    status_code=401,
-                    content={"detail": error_msg}
-                )
-            return RedirectResponse(
-                url=f"/login?error={error_msg.replace(' ', '+')}",
-                status_code=303
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Incorrect username or password",
+                headers={"WWW-Authenticate": "Bearer"}
             )
         
         # Create access token with 1-hour expiration
@@ -1408,135 +1373,99 @@ async def login(
             expires_delta=access_token_expires
         )
         
-        # For development, use secure=False. In production, set to True and use HTTPS
-        secure_cookie = False  # Change to True in production with HTTPS
-        
-        # Prepare response based on content type
-        if is_json:
-            response_data = {
-                "access_token": access_token,
-                "token_type": "bearer",
-                "user": {
-                    "username": user.username,
-                    "email": user.email
-                }
-            }
-            response = JSONResponse(content=response_data)
-        else:
-            # For form submission, create a redirect response
-            response = RedirectResponse(
-                url="/chat",
-                status_code=303
-            )
-        
-        # Get the domain from the request (remove port if present)
-        domain = request.url.hostname
-        if ':' in domain:
-            domain = domain.split(':')[0]
-            
-        # Set the access token cookie (HTTP-only for security)
-        response.set_cookie(
-            key="access_token",
-            value=f"Bearer {access_token}",
-            httponly=True,
-            max_age=3600,  # 1 hour in seconds
-            secure=secure_cookie,
-            samesite="lax",
-            path="/",
-            domain=domain if domain and domain != 'localhost' else None  # Don't set domain for localhost
-        )
-        
-        # Set username in a cookie for the frontend
-        response.set_cookie(
-            key="username",
-            value=user.username,
-            max_age=3600,
-            secure=secure_cookie,
-            samesite="lax",
-            path="/"
-        )
-        
-        # Set a simple logged_in flag for the frontend to check
-        response.set_cookie(
-            key="logged_in",
-            value="true",
-            max_age=3600,
-            secure=secure_cookie,
-            samesite="lax",
-            path="/"
-        )
-        
-        # For debugging - set a non-httpOnly cookie as well
-        response.set_cookie(
-            key="auth_debug",
-            value=f"user_{user.username}",
-            max_age=3600,
-            secure=secure_cookie,
-            samesite="lax",
-            path="/"
-        )
-        
-        # For form submissions, we need to return the response directly
-        if not is_json:
-            return response
-        
         print(f"[DEBUG] Login successful for user: {username}")
-        return response
         
+        # Return JWT token response
+        return {
+            "access_token": access_token,
+            "token_type": "bearer"
+        }
+        
+    except HTTPException:
+        raise
     except Exception as e:
-        error_msg = f"An error occurred during login: {str(e)}"
-        print(f"[ERROR] {error_msg}")
-        if is_json:
-            return JSONResponse(
-                status_code=500,
-                content={"detail": "Internal server error"}
-            )
-        return RedirectResponse(
-            url="/login?error=An+error+occurred+during+login",
-            status_code=303
+        print(f"[ERROR] Login error: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Internal server error"
         )
 
-@app.post("/api/auth/register")
+@app.post("/api/auth/register", tags=["Authentication"])
 async def register_user(
     request: Request,
+    response: Response,
+    user_data: Optional[UserCreateAPI] = None,
+    username: Optional[str] = Form(None),
+    email: Optional[str] = Form(None),
+    password: Optional[str] = Form(None),
+    confirm_password: Optional[str] = Form(None),
     db: Session = Depends(get_db)
 ):
-    """Register a new user."""
+    """
+    Register a new user account.
+    
+    Supports both JSON (for Swagger UI) and form data (for HTML forms).
+    
+    **Request Body (JSON):**
+    - **username**: Unique username (3-50 characters)
+    - **email**: User email address
+    - **password**: Password (minimum 8 characters)
+    
+    **Returns:**
+    - **message**: Success message
+    - **username**: Registered username
+    - **email**: Registered email
+    """
     try:
-        # Parse form data
-        form_data = await request.form()
-        username = form_data.get('username')
-        email = form_data.get('email')
-        password = form_data.get('password')
-        confirm_password = form_data.get('confirm_password')
+        # Determine if request is JSON or form data
+        content_type = request.headers.get('content-type', '')
+        is_json = 'application/json' in content_type
         
-        # Validate required fields
-        if not all([username, email, password, confirm_password]):
-            return RedirectResponse(
-                url="/register?error=All+fields+are+required",
-                status_code=303
-            )
-            
-        # Check if passwords match
-        if password != confirm_password:
-            return RedirectResponse(
-                url="/register?error=Passwords+do+not+match",
-                status_code=303
-            )
+        # Extract data based on content type
+        if is_json and user_data:
+            # JSON request (Swagger UI)
+            username = user_data.username
+            email = user_data.email
+            password = user_data.password
+        else:
+            # Form data (HTML form)
+            if not username or not email or not password:
+                return RedirectResponse(
+                    url="/register?error=All+fields+are+required",
+                    status_code=303
+                )
+            # Check password confirmation for forms
+            if confirm_password and password != confirm_password:
+                return RedirectResponse(
+                    url="/register?error=Passwords+do+not+match",
+                    status_code=303
+                )
         
         # Check if username already exists
         db_user = db.query(User).filter(User.username == username).first()
         if db_user:
+            error_msg = "Username already registered"
+            if is_json:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=error_msg
+                )
             return RedirectResponse(
-                url="/register?error=Username+already+registered",
+                url=f"/register?error={error_msg.replace(' ', '+')}",
                 status_code=303
             )
         
         # Check if email already exists
         db_email = db.query(User).filter(User.hashed_email == email).first()
         if db_email:
+            error_msg = "Email already registered"
+            if is_json:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=error_msg
+                )
             return RedirectResponse(
-                url="/register?error=Email+already+registered",
+                url=f"/register?error={error_msg.replace(' ', '+')}",
                 status_code=303
             )
         
@@ -1554,16 +1483,34 @@ async def register_user(
         db.commit()
         db.refresh(db_user)
         
-        # Redirect to login with success message
-        return RedirectResponse(
-            url="/login?registered=1",
-            status_code=303
-        )
+        # Return success response based on content type
+        if is_json:
+            return {
+                "message": "User registered successfully",
+                "username": username,
+                "email": email
+            }
+        else:
+            # Redirect to login page for HTML forms
+            return RedirectResponse(
+                url="/login?registered=1",
+                status_code=303
+            )
         
+    except HTTPException:
+        db.rollback()
+        raise
     except Exception as e:
         db.rollback()
+        error_msg = str(e)
+        print(f"[ERROR] Registration error: {error_msg}")
+        if is_json:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Registration failed"
+            )
         return RedirectResponse(
-            url=f"/register?error={str(e).replace(' ', '+')}",
+            url=f"/register?error=Registration+failed",
             status_code=303
         )
 

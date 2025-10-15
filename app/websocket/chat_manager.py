@@ -243,7 +243,9 @@ class ConnectionManager:
             
         if room_id and room_id in self.room_connections:
             # Send to all clients in the specified room
-            for client_id in self.room_connections[room_id]:
+            # Create a copy of the set to avoid "Set changed size during iteration" error
+            clients_snapshot = list(self.room_connections[room_id])
+            for client_id in clients_snapshot:
                 if client_id not in exclude and client_id in self.active_connections:
                     try:
                         await self.active_connections[client_id].send_json(message)
@@ -251,7 +253,9 @@ class ConnectionManager:
                         logger.error(f"Error broadcasting to {client_id}: {e}")
         else:
             # Send to all active connections
-            for client_id, connection in self.active_connections.items():
+            # Create a copy to avoid modification during iteration
+            connections_snapshot = list(self.active_connections.items())
+            for client_id, connection in connections_snapshot:
                 if client_id not in exclude:
                     try:
                         await connection.send_json(message)

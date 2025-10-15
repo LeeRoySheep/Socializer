@@ -14,7 +14,7 @@ from app.auth import get_current_user
 from datamanager.data_manager import DataManager
 from datamanager.data_model import User, ChatRoom, RoomMember, RoomMessage, RoomInvite
 
-router = APIRouter(prefix="/api/rooms", tags=["rooms"])
+router = APIRouter(tags=["rooms"])
 
 
 # ==========================================
