@@ -1627,9 +1627,29 @@ When user asks about:
                             tool_args=tool_args
                         )
                         
-                        # Return a message telling LLM to use existing results
-                        return {"messages": [{"role": "assistant", 
-                                          "content": "I've already retrieved that information in a previous search. Based on those results, let me provide you with the answer."}]}
+                        # IMPROVED: Find and include previous tool result in the response
+                        previous_result = self._find_previous_tool_result(messages, tool_name, tool_args)
+                        
+                        if previous_result:
+                            # Include the actual previous result
+                            redirect_content = (
+                                f"I already retrieved this information earlier. "
+                                f"Here's what I found: {previous_result}"
+                            )
+                            print(f"✅ Found previous result ({len(previous_result)} chars)")
+                        else:
+                            # Fallback if we can't find the result
+                            redirect_content = (
+                                f"I notice I already searched for this information earlier in our conversation. "
+                                f"Please refer to my previous response above for the answer."
+                            )
+                            print("⚠️ Could not find previous result - using generic redirect")
+                        
+                        from langchain_core.messages import AIMessage
+                        redirect_message = AIMessage(content=redirect_content)
+                        
+                        print("🔄 Redirecting LLM to use previous context instead of re-calling tool")
+                        return {"messages": [redirect_message]}
                 
                 print(f"✅ No duplicates - approving tool execution")
                 print("="*70)
@@ -1695,6 +1715,42 @@ When user asks about:
             traceback.print_exc()
             return END
 
+    def _find_previous_tool_result(self, messages: list, tool_name: str, tool_args: dict) -> Optional[str]:
+        """
+        OOP Helper: Find previous tool result from conversation history.
+        
+        Args:
+            messages: Conversation history
+            tool_name: Name of the tool to find
+            tool_args: Arguments used in the tool call
+            
+        Returns:
+            The tool result content if found, None otherwise
+        """
+        try:
+            # Search backwards through messages for matching tool call + result
+            for i, msg in enumerate(reversed(messages)):
+                # Check if this is an AI message with tool calls
+                if hasattr(msg, 'tool_calls') and msg.tool_calls:
+                    for tc in msg.tool_calls:
+                        tc_name = tc.get('name') if isinstance(tc, dict) else getattr(tc, 'name', '')
+                        tc_args = tc.get('args') if isinstance(tc, dict) else getattr(tc, 'args', {})
+                        
+                        # Match found!
+                        if tc_name == tool_name and str(tc_args) == str(tool_args):
+                            # Look for the tool result in next message
+                            result_idx = len(messages) - i
+                            if result_idx < len(messages):
+                                next_msg = messages[result_idx]
+                                if hasattr(next_msg, 'content'):
+                                    return next_msg.content
+            
+            return None
+            
+        except Exception as e:
+            print(f"⚠️ Error finding previous tool result: {e}")
+            return None
+    
     def build_graph(self):
         from langgraph.graph import StateGraph
         
