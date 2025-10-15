@@ -1595,6 +1595,12 @@ When user asks about:
                 print(f"🔍 DUPLICATE CHECK: LLM wants to call tools")
                 print("="*70)
                 
+                # Tools that should NEVER be blocked (formatting/utility tools)
+                NEVER_BLOCK_TOOLS = {
+                    'format_output',
+                    'clarify_communication',  # Translation/clarification
+                }
+                
                 # Collect all previous tool calls from conversation
                 previous_calls = set()
                 for msg in messages:
@@ -1613,6 +1619,12 @@ When user asks about:
                     current_call = (tool_name, str(tool_args))
                     
                     print(f"🎯 LLM wants: {tool_name}({tool_args})")
+                    
+                    # Skip duplicate check for formatting tools
+                    if tool_name in NEVER_BLOCK_TOOLS:
+                        print(f"   ✅ {tool_name} is a formatting tool - NEVER blocked")
+                        continue
+                    
                     print(f"   Is duplicate? {current_call in previous_calls}")
                     
                     if current_call in previous_calls:
