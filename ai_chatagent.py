@@ -1639,40 +1639,18 @@ When user asks about:
                             tool_args=tool_args
                         )
                         
-                        # IMPROVED: Find previous tool result and inject it as ToolMessage
-                        previous_result = self._find_previous_tool_result(messages, tool_name, tool_args)
+                        # Return a friendly redirect message without raw data
+                        # The LLM should recall from context or ask user to check previous response
+                        print("🔄 Redirecting user to previous response")
+                        redirect_content = (
+                            "I already searched for this information moments ago. "
+                            "Please check my previous response above for the answer, "
+                            "or ask me to search again if you need updated information."
+                        )
                         
-                        if previous_result:
-                            print(f"✅ Found previous result ({len(previous_result)} chars)")
-                            print(f"🔄 Injecting previous result as ToolMessage so LLM can continue processing")
-                            
-                            # Create a ToolMessage with the previous result
-                            # This allows the LLM to continue (e.g., call format_output)
-                            from langchain_core.messages import ToolMessage
-                            
-                            # Get the tool_call_id from the current request
-                            tool_call_id = tool_call.get('id') if isinstance(tool_call, dict) else getattr(tool_call, 'id', 'duplicate_blocked')
-                            
-                            tool_message = ToolMessage(
-                                content=previous_result,
-                                tool_call_id=tool_call_id,
-                                name=tool_name
-                            )
-                            
-                            # Return both the AIMessage with tool_calls AND the ToolMessage result
-                            # This allows the conversation to continue naturally
-                            return {"messages": [response, tool_message]}
-                        else:
-                            # Fallback if we can't find the result - return friendly message
-                            print("⚠️ Could not find previous result - returning friendly message")
-                            redirect_content = (
-                                f"I notice I already searched for this information earlier in our conversation. "
-                                f"Please refer to my previous response above for the answer."
-                            )
-                            
-                            from langchain_core.messages import AIMessage
-                            redirect_message = AIMessage(content=redirect_content)
-                            return {"messages": [redirect_message]}
+                        from langchain_core.messages import AIMessage
+                        redirect_message = AIMessage(content=redirect_content)
+                        return {"messages": [redirect_message]}
                 
                 print(f"✅ No duplicates - approving tool execution")
                 print("="*70)
