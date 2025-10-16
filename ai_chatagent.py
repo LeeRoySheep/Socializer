@@ -487,6 +487,10 @@ class SkillEvaluator(BaseTool):
         return suggestions
 
 
+class TavilySearchInput(BaseModel):
+    """Input schema for TavilySearchTool - Gemini compatible."""
+    query: str = Field(description="The search query string")
+
 class TavilySearchTool(BaseTool):
     name: str = "tavily_search"
     description: str = """Search the web for current information.
@@ -494,8 +498,9 @@ class TavilySearchTool(BaseTool):
     Use this tool when you need to find up-to-date information, current events, 
     or real-time data like time, weather, news, etc.
     
-    The input should be a search query string or a dictionary with a 'query' key.
+    Input: A search query string (e.g. 'current weather in Paris', 'latest news')
     """
+    args_schema: Type[BaseModel] = TavilySearchInput
     search_tool: Any = None  # This needs to be a class variable for Pydantic
     
     def __init__(self, search_tool, **data):
@@ -1190,12 +1195,12 @@ class AiChatagent:
         
         if is_gemini:
             # Gemini has stricter tool schema requirements
-            # Use only basic tools that are Gemini-compatible
+            # Use only tools with explicit, simple schemas
             gemini_compatible_tools = []
             for tool in tool_list:
                 tool_name = getattr(tool, 'name', '')
-                # Only include simple tools without complex schemas
-                if tool_name in ['format_output', 'user_preference', 'clarify_communication']:
+                # Include tools with proper args_schema defined
+                if tool_name in ['tavily_search', 'format_output', 'user_preference', 'clarify_communication']:
                     gemini_compatible_tools.append(tool)
             
             if gemini_compatible_tools:
