@@ -1414,22 +1414,23 @@ When user asks about:
 - Celebrate improvements specific to THIS user
 - Track communication patterns for THIS user only
 
-🚫 **CRITICAL: NEVER REPEAT TOOL CALLS & RESPOND AFTER TOOL RESULTS**
+🚫 **CRITICAL: NEVER REPEAT TOOL CALLS & ALWAYS USE format_output**
 ⚠️  IMPORTANT RULES:
-1. **After getting tool results, RESPOND to the user - do NOT call another tool!**
-   - If you just received search results → Format and respond to user
-   - If you just received weather data → Tell user the weather
-   - DO NOT search again or call another tool unless user asks something NEW
+1. **After getting search/tool results → IMMEDIATELY call format_output, then STOP**
+   - See weather data in conversation? → Call format_output({'data': <weather_json>, 'data_type': 'weather'})
+   - See search results? → Call format_output({'data': <search_json>, 'data_type': 'search'})
+   - After format_output returns → STOP and respond to user
+   - DO NOT call tavily_search or any other tool after format_output
    
-2. **Never call the same tool twice in a row**
-   - ONE search per question is enough
-   - If search returned results → Use them and respond
-   - Do NOT refine the search or try different queries
+2. **NEVER call the same tool twice**
+   - If you see a ToolMessage with weather/search data → Use format_output IMMEDIATELY
+   - ONE search per question, ONE format_output call, then RESPOND
+   - Do NOT search again, do NOT refine queries, do NOT call more tools
    
-3. **Check conversation history before calling tools**
-   - If you see a tool result, USE IT - don't request the same information again
-   - Example: If you already searched for "Paris weather", use those results
-   - Repeating tool calls wastes resources and slows responses
+3. **Detect when you already have the answer:**
+   - See ToolMessage with weather data? → You HAVE the answer → Call format_output → DONE
+   - See ToolMessage with search results? → You HAVE the answer → Call format_output → DONE
+   - DO NOT call tavily_search if you see a recent ToolMessage with relevant data
 
 1. SOCIAL BEHAVIOR TRAINING (Priority: HIGH)
    - Guide users toward polite, respectful communication (please, thank you, constructive feedback)
@@ -1666,7 +1667,7 @@ When user asks about:
                     
                     if current_call in previous_calls:
                         print(f"\n⚠️  ⚠️  ⚠️  DUPLICATE BLOCKED! ⚠️  ⚠️  ⚠️")
-                        print(f"🛑 {tool_name} already called with same args - using previous results")
+                        print(f"🛑 {tool_name} already called with same args - extracting previous results")
                         print("="*70 + "\n")
                         
                         # ✅ O-T-E: Log duplicate block
@@ -1676,13 +1677,45 @@ When user asks about:
                             tool_args=tool_args
                         )
                         
-                        # Return a friendly redirect message without raw data
-                        # The LLM should recall from context or ask user to check previous response
-                        print("🔄 Redirecting user to previous response")
+                        # Find the previous tool result in messages
+                        previous_result = None
+                        for i, msg in enumerate(messages):
+                            if hasattr(msg, 'tool_calls') and msg.tool_calls:
+                                for tc in msg.tool_calls:
+                                    tc_name = tc.get('name') if isinstance(tc, dict) else getattr(tc, 'name', '')
+                                    tc_args = tc.get('args') if isinstance(tc, dict) else getattr(tc, 'args', {})
+                                    if (tc_name, str(tc_args)) == current_call:
+                                        # Found the original call, get the next ToolMessage
+                                        if i + 1 < len(messages) and hasattr(messages[i + 1], 'content'):
+                                            previous_result = messages[i + 1].content
+                                            print(f"✅ Found previous result: {str(previous_result)[:100]}...")
+                                            break
+                        
+                        if previous_result:
+                            # Check if result was already formatted
+                            if not previous_result.startswith('{'):
+                                # Already formatted, just return it
+                                print("✅ Previous result already formatted, returning it")
+                                from langchain_core.messages import AIMessage
+                                return {"messages": [AIMessage(content=previous_result)]}
+                            else:
+                                # Raw data, need to format it
+                                print("🔧 Previous result is raw data, calling format_output")
+                                # Force format_output call instead
+                                from langchain_core.messages import AIMessage
+                                format_call = {
+                                    'name': 'format_output',
+                                    'args': {'data': previous_result, 'data_type': 'weather' if 'location' in previous_result else 'search'},
+                                    'id': 'duplicate_format_' + str(hash(previous_result)),
+                                    'type': 'tool_call'
+                                }
+                                format_message = AIMessage(content='', tool_calls=[format_call])
+                                return {"messages": [format_message]}
+                        
+                        # Fallback: generic message
+                        print("🔄 No previous result found, returning generic message")
                         redirect_content = (
-                            "I already searched for this information moments ago. "
-                            "Please check my previous response above for the answer, "
-                            "or ask me to search again if you need updated information."
+                            "I already have this information. Let me provide it to you based on my previous search."
                         )
                         
                         from langchain_core.messages import AIMessage
