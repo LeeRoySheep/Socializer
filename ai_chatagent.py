@@ -1183,7 +1183,35 @@ class AiChatagent:
         
         # ✅ FIX: Bind actual tool instances (BaseTool objects) to LLM, not dictionaries!
         tool_list = list(self.tool_instances.values())
-        self.llm_with_tools = llm.bind_tools(tool_list)
+        
+        # Check if using Gemini (has compatibility issues with some tools)
+        llm_model_name = getattr(llm, 'model_name', getattr(llm, 'model', ''))
+        is_gemini = 'gemini' in str(llm_model_name).lower()
+        
+        if is_gemini:
+            # Gemini has stricter tool schema requirements
+            # Use only basic tools that are Gemini-compatible
+            gemini_compatible_tools = []
+            for tool in tool_list:
+                tool_name = getattr(tool, 'name', '')
+                # Only include simple tools without complex schemas
+                if tool_name in ['format_output', 'user_preference', 'clarify_communication']:
+                    gemini_compatible_tools.append(tool)
+            
+            if gemini_compatible_tools:
+                print(f"⚠️  Gemini detected - using {len(gemini_compatible_tools)} compatible tools")
+                try:
+                    self.llm_with_tools = llm.bind_tools(gemini_compatible_tools)
+                except Exception as e:
+                    print(f"⚠️  Gemini tool binding failed: {e}")
+                    print("⚠️  Using Gemini without tools")
+                    self.llm_with_tools = llm
+            else:
+                print("⚠️  Gemini: No compatible tools, using without tools")
+                self.llm_with_tools = llm
+        else:
+            # OpenAI, Claude, etc - use all tools
+            self.llm_with_tools = llm.bind_tools(tool_list)
 
     def get_conversation_history(self) -> List[Dict[str, Any]]:
         """Retrieve the conversation history for this agent."""
