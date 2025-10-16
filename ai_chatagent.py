@@ -1209,15 +1209,11 @@ class AiChatagent:
         is_gemini = 'gemini' in str(llm_model_name).lower()
         
         if is_gemini:
-            # Gemini has stricter tool schema requirements
-            # All tools now have proper args_schema defined!
-            print(f"✅ Gemini detected - using ALL {len(tool_list)} tools (now compatible!)")
-            try:
-                self.llm_with_tools = llm.bind_tools(tool_list)
-            except Exception as e:
-                print(f"⚠️  Gemini tool binding failed: {e}")
-                print("⚠️  Using Gemini without tools")
-                self.llm_with_tools = llm
+            # Gemini has issues generating proper responses after tool calls
+            # Use without tools for now to ensure it responds
+            print(f"⚠️  Gemini detected - using WITHOUT tools due to empty response issue")
+            print(f"   Gemini will answer questions but cannot search web or use tools")
+            self.llm_with_tools = llm
         else:
             # OpenAI, Claude, etc - use all tools
             self.llm_with_tools = llm.bind_tools(tool_list)
@@ -1788,6 +1784,32 @@ When user asks about:
                     print(f"   Tool: {tool_name}")
                 # Return the AIMessage with tool_calls - graph will route to tools node
                 return {"messages": [response]}
+            
+            # Check if Gemini returned an empty response (common issue)
+            response_content = response.content if hasattr(response, 'content') else str(response)
+            if not response_content or response_content.strip() in ['', '```', '\n```', '`']:
+                print("⚠️  DETECTED EMPTY RESPONSE - Generating fallback")
+                
+                # Check if we have tool results in recent messages that weren't used
+                for msg in reversed(messages[-3:]):
+                    if hasattr(msg, 'type') and msg.type == 'tool':
+                        tool_result = msg.content
+                        print(f"✅ Found unused tool result, creating response from it")
+                        
+                        # Generate a helpful response based on the tool result
+                        from langchain_core.messages import AIMessage
+                        fallback_response = AIMessage(
+                            content=f"Based on the information I found: {tool_result[:500]}..."
+                        )
+                        return {"messages": [fallback_response]}
+                
+                # No tool results found, ask user to try again
+                print("⚠️  No tool results found, asking user to try again")
+                from langchain_core.messages import AIMessage
+                fallback_response = AIMessage(
+                    content="I apologize, but I'm having trouble generating a response. Could you please rephrase your question or try asking something else?"
+                )
+                return {"messages": [fallback_response]}
             
             # Regular response (no tool calls) - return it
             return {"messages": [response]}
