@@ -1257,9 +1257,18 @@ class AiChatagent:
                         call_counts[call] = call_counts.get(call, 0) + 1
                     
                     # If any call appears 2+ times, stop the loop
+                    # BUT exclude formatting/utility tools (these should never be blocked)
+                    NEVER_LOOP_BLOCK = {'format_output', 'clarify_communication'}
+                    
                     for call, count in call_counts.items():
                         if count >= 2:
                             tool_name = call[0]
+                            
+                            # Skip loop detection for formatting tools
+                            if tool_name in NEVER_LOOP_BLOCK:
+                                print(f"✅ {tool_name} called {count} times - ALLOWED (formatting tool)")
+                                continue
+                            
                             print(f"⚠️  Detected tool loop: {tool_name} called {count} times with same args, breaking...")
                             return {"messages": [{"role": "assistant", 
                                               "content": f"I've already searched for that information. Based on the results I found, let me provide you with the answer."}]}
