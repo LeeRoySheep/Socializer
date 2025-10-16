@@ -1117,6 +1117,11 @@ async def root():
     """Redirect to the login page."""
     return RedirectResponse(url="/login")
 
+@app.get("/test-login")
+async def test_login_page(request: Request):
+    """Serve the diagnostic login test page."""
+    return templates.TemplateResponse("test_login.html", {"request": request})
+
 @app.get("/login")
 async def login_page(request: Request):
     """Serve the login page with any error messages."""
