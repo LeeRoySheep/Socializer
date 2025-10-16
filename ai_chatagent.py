@@ -1610,10 +1610,18 @@ When user asks about:
                     'clarify_communication',  # Translation/clarification
                 }
                 
-                # Collect all previous tool calls from conversation
+                # Collect tool calls from the CURRENT user question only
+                # Find the last HumanMessage (current user question)
+                last_human_index = -1
+                for i in range(len(messages) - 1, -1, -1):
+                    if hasattr(messages[i], 'type') and messages[i].type == 'human':
+                        last_human_index = i
+                        break
+                
+                # Only check tool calls AFTER the last user message (current processing cycle)
                 previous_calls = set()
                 previous_tool_names = []  # Track tool names in order
-                for msg in messages:
+                for msg in messages[last_human_index:] if last_human_index >= 0 else messages:
                     if hasattr(msg, 'tool_calls') and msg.tool_calls:
                         for prev_tc in msg.tool_calls:
                             prev_name = prev_tc.get('name') if isinstance(prev_tc, dict) else getattr(prev_tc, 'name', '')
@@ -1621,18 +1629,17 @@ When user asks about:
                             previous_calls.add((prev_name, str(prev_args)))
                             previous_tool_names.append(prev_name)
                 
-                print(f"📊 Found {len(previous_calls)} previous tool calls in conversation")
-                print(f"📋 Tool sequence: {previous_tool_names}")
+                print(f"📊 Found {len(previous_calls)} tool calls in CURRENT question")
+                print(f"📋 Tool sequence (current question): {previous_tool_names}")
                 
-                # Check for LOOP: Same tool called multiple times
-                # Count consecutive calls of data-fetching tools
+                # Check for LOOP: Same tool called multiple times within THIS question
                 if len(previous_tool_names) >= 1:
-                    # Count how many times tavily_search was called
+                    # Count tavily_search calls in current question
                     search_count = previous_tool_names.count('tavily_search')
                     
-                    # If tavily_search called 2+ times, STOP
+                    # If tavily_search called 2+ times in THIS question, it's a loop
                     if search_count >= 2:
-                        print(f"\n🔴 LOOP DETECTED: tavily_search called {search_count} times!")
+                        print(f"\n🔴 LOOP DETECTED: tavily_search called {search_count} times for this question!")
                         print(f"🛑 Blocking further tavily_search calls to prevent infinite loop")
                         
                         # Force stop the loop
@@ -1641,19 +1648,6 @@ When user asks about:
                             content="I've already searched for this information. Based on the search results above, I can answer your question. Please let me know if you need any clarification or have a different question."
                         )
                         return {"messages": [stop_message]}
-                    
-                    # Also check if LLM wants to call tavily_search again
-                    for tool_call in response.tool_calls:
-                        tool_name = tool_call.get('name') if isinstance(tool_call, dict) else getattr(tool_call, 'name', 'unknown')
-                        if tool_name == 'tavily_search' and 'tavily_search' in previous_tool_names:
-                            print(f"\n🔴 PREVENTING LOOP: tavily_search already called, refusing new call")
-                            print(f"🛑 Returning stop message")
-                            
-                            from langchain_core.messages import AIMessage
-                            stop_message = AIMessage(
-                                content="I've already searched for this information. Based on the results, the information is available in my previous response. Would you like me to clarify anything?"
-                            )
-                            return {"messages": [stop_message]}
                 
                 # Check each requested tool call
                 for tool_call in response.tool_calls:
