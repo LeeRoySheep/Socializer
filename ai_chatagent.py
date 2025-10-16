@@ -1414,13 +1414,22 @@ When user asks about:
 - Celebrate improvements specific to THIS user
 - Track communication patterns for THIS user only
 
-🚫 **CRITICAL: NEVER REPEAT TOOL CALLS**
-⚠️  IMPORTANT RULE: If you've already called a tool in this conversation, DO NOT call it again with the same arguments!
-- Check the conversation history for tool results before making a call
-- If you see a tool result, USE IT - don't request the same information again
-- Example: If you already searched for "Paris weather" and got results, use those results instead of searching again
-- Repeating tool calls wastes resources and slows down responses
-- ALWAYS use existing tool results from the conversation when available
+🚫 **CRITICAL: NEVER REPEAT TOOL CALLS & RESPOND AFTER TOOL RESULTS**
+⚠️  IMPORTANT RULES:
+1. **After getting tool results, RESPOND to the user - do NOT call another tool!**
+   - If you just received search results → Format and respond to user
+   - If you just received weather data → Tell user the weather
+   - DO NOT search again or call another tool unless user asks something NEW
+   
+2. **Never call the same tool twice in a row**
+   - ONE search per question is enough
+   - If search returned results → Use them and respond
+   - Do NOT refine the search or try different queries
+   
+3. **Check conversation history before calling tools**
+   - If you see a tool result, USE IT - don't request the same information again
+   - Example: If you already searched for "Paris weather", use those results
+   - Repeating tool calls wastes resources and slows responses
 
 1. SOCIAL BEHAVIOR TRAINING (Priority: HIGH)
    - Guide users toward polite, respectful communication (please, thank you, constructive feedback)
@@ -1603,14 +1612,30 @@ When user asks about:
                 
                 # Collect all previous tool calls from conversation
                 previous_calls = set()
+                previous_tool_names = []  # Track tool names in order
                 for msg in messages:
                     if hasattr(msg, 'tool_calls') and msg.tool_calls:
                         for prev_tc in msg.tool_calls:
                             prev_name = prev_tc.get('name') if isinstance(prev_tc, dict) else getattr(prev_tc, 'name', '')
                             prev_args = prev_tc.get('args') if isinstance(prev_tc, dict) else getattr(prev_tc, 'args', {})
                             previous_calls.add((prev_name, str(prev_args)))
+                            previous_tool_names.append(prev_name)
                 
                 print(f"📊 Found {len(previous_calls)} previous tool calls in conversation")
+                
+                # Check for LOOP: Same tool called multiple times in a row
+                if len(previous_tool_names) >= 2:
+                    last_two = previous_tool_names[-2:]
+                    if last_two[0] == last_two[1] and last_two[0] in ['tavily_search']:
+                        print(f"\n🔴 LOOP DETECTED: {last_two[0]} called twice in a row!")
+                        print(f"🛑 Blocking further {last_two[0]} calls to prevent infinite loop")
+                        
+                        # Force stop the loop
+                        from langchain_core.messages import AIMessage
+                        stop_message = AIMessage(
+                            content="Based on the search results I found, the information is already available in my previous response. Please let me know if you need any clarification or have a different question."
+                        )
+                        return {"messages": [stop_message]}
                 
                 # Check each requested tool call
                 for tool_call in response.tool_calls:
