@@ -1622,20 +1622,38 @@ When user asks about:
                             previous_tool_names.append(prev_name)
                 
                 print(f"📊 Found {len(previous_calls)} previous tool calls in conversation")
+                print(f"📋 Tool sequence: {previous_tool_names}")
                 
-                # Check for LOOP: Same tool called multiple times in a row
-                if len(previous_tool_names) >= 2:
-                    last_two = previous_tool_names[-2:]
-                    if last_two[0] == last_two[1] and last_two[0] in ['tavily_search']:
-                        print(f"\n🔴 LOOP DETECTED: {last_two[0]} called twice in a row!")
-                        print(f"🛑 Blocking further {last_two[0]} calls to prevent infinite loop")
+                # Check for LOOP: Same tool called multiple times
+                # Count consecutive calls of data-fetching tools
+                if len(previous_tool_names) >= 1:
+                    # Count how many times tavily_search was called
+                    search_count = previous_tool_names.count('tavily_search')
+                    
+                    # If tavily_search called 2+ times, STOP
+                    if search_count >= 2:
+                        print(f"\n🔴 LOOP DETECTED: tavily_search called {search_count} times!")
+                        print(f"🛑 Blocking further tavily_search calls to prevent infinite loop")
                         
                         # Force stop the loop
                         from langchain_core.messages import AIMessage
                         stop_message = AIMessage(
-                            content="Based on the search results I found, the information is already available in my previous response. Please let me know if you need any clarification or have a different question."
+                            content="I've already searched for this information. Based on the search results above, I can answer your question. Please let me know if you need any clarification or have a different question."
                         )
                         return {"messages": [stop_message]}
+                    
+                    # Also check if LLM wants to call tavily_search again
+                    for tool_call in response.tool_calls:
+                        tool_name = tool_call.get('name') if isinstance(tool_call, dict) else getattr(tool_call, 'name', 'unknown')
+                        if tool_name == 'tavily_search' and 'tavily_search' in previous_tool_names:
+                            print(f"\n🔴 PREVENTING LOOP: tavily_search already called, refusing new call")
+                            print(f"🛑 Returning stop message")
+                            
+                            from langchain_core.messages import AIMessage
+                            stop_message = AIMessage(
+                                content="I've already searched for this information. Based on the results, the information is available in my previous response. Would you like me to clarify anything?"
+                            )
+                            return {"messages": [stop_message]}
                 
                 # Check each requested tool call
                 for tool_call in response.tool_calls:
