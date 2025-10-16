@@ -879,12 +879,18 @@
                 <!-- LLM Model Switcher -->
                 <div class="llm-switcher-container">
                     <select id="llm-model-selector" class="llm-model-selector" title="Select AI Model">
-                        <optgroup label="☁️ Cloud Models">
-                            <option value="gpt-4o-mini" selected>GPT-4o Mini (Fast)</option>
-                            <option value="gpt-4o">GPT-4o (Balanced)</option>
+                        <optgroup label="☁️ OpenAI Models">
+                            <option value="gpt-4o-mini" selected>GPT-4o Mini (Fast & Cheap)</option>
+                            <option value="gpt-4.1-mini">GPT-4.1 Mini (Better Reasoning)</option>
+                            <option value="gpt-5-mini">GPT-5 Mini (Latest)</option>
+                            <option value="gpt-4o">GPT-4o (Most Capable)</option>
                             <option value="gpt-4-turbo">GPT-4 Turbo (Advanced)</option>
+                        </optgroup>
+                        <optgroup label="🌟 Google Gemini">
+                            <option value="gemini-2.0-flash-exp">Gemini 2.0 Flash (FREE!)</option>
+                        </optgroup>
+                        <optgroup label="🤖 Anthropic Claude">
                             <option value="claude-3-5-sonnet-20241022">Claude 3.5 Sonnet</option>
-                            <option value="gemini-2.0-flash-exp">Gemini 2.0 Flash</option>
                         </optgroup>
                         <optgroup label="💻 Local Models">
                             <option value="lm-studio-local">LM Studio (Local)</option>
@@ -1200,11 +1206,13 @@
         
         function showModelChangeNotification(model) {
             const modelNames = {
-                'gpt-4o-mini': 'GPT-4o Mini (Fast)',
-                'gpt-4o': 'GPT-4o (Balanced)',
+                'gpt-4o-mini': 'GPT-4o Mini (Fast & Cheap)',
+                'gpt-4.1-mini': 'GPT-4.1 Mini (Better Reasoning)',
+                'gpt-5-mini': 'GPT-5 Mini (Latest)',
+                'gpt-4o': 'GPT-4o (Most Capable)',
                 'gpt-4-turbo': 'GPT-4 Turbo (Advanced)',
                 'claude-3-5-sonnet-20241022': 'Claude 3.5 Sonnet',
-                'gemini-2.0-flash-exp': 'Gemini 2.0 Flash',
+                'gemini-2.0-flash-exp': 'Gemini 2.0 Flash (FREE!)',
                 'lm-studio-local': 'LM Studio (Local)',
                 'ollama-local': 'Ollama (Local)'
             };
