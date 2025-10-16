@@ -1239,10 +1239,19 @@ class AiChatagent:
             print(f"Last message type: {type(last_message).__name__}")
             
             # ✅ ENHANCED: Check for tool call loops (same tool called 2+ times)
+            # BUT ONLY within the CURRENT user question (not across different questions)
             if len(messages) >= 3:
-                # Collect ALL tool calls from recent messages
+                # Find the last HumanMessage to scope to current question
+                last_human_index = -1
+                for i in range(len(messages) - 1, -1, -1):
+                    if hasattr(messages[i], 'type') and messages[i].type == 'human':
+                        last_human_index = i
+                        break
+                
+                # Collect tool calls from CURRENT question only
                 tool_calls_history = []
-                for msg in messages[-6:]:  # Check last 6 messages instead of 4
+                messages_to_check = messages[last_human_index:] if last_human_index >= 0 else messages[-6:]
+                for msg in messages_to_check:
                     if hasattr(msg, 'tool_calls') and msg.tool_calls:
                         for tc in msg.tool_calls:
                             tool_name = tc.get('name') if isinstance(tc, dict) else getattr(tc, 'name', '')
