@@ -46,15 +46,17 @@ class LLMSettings:
     OPENAI_OPTIONS = {
         "gpt-4o": "Most capable, best for complex tasks",
         "gpt-4o-mini": "Fast and cost-effective, great for most tasks",
+        "gpt-4.1-mini": "Improved mini model with better reasoning",
+        "gpt-5-mini": "Latest mini model, enhanced capabilities",
         "gpt-4-turbo": "Powerful, good balance",
         "gpt-3.5-turbo": "Fast and cheap, basic tasks",
     }
     
     # Gemini Models
     GEMINI_OPTIONS = {
-        "gemini-2.0-flash-exp": "Experimental, very fast",
-        "gemini-1.5-pro": "Most capable Gemini model",
-        "gemini-1.5-flash": "Fast and efficient",
+        "gemini-2.0-flash-exp": "Free tier - Experimental, very fast ✅",
+        "gemini-1.5-pro": "Paid only - Most capable Gemini model",
+        "gemini-1.5-flash": "Paid only - Fast and efficient",
     }
     
     # Claude Models

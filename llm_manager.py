@@ -31,6 +31,8 @@ class LLMConfig:
     OPENAI_MODELS = {
         "gpt-4o": {"max_tokens": 4096, "supports_tools": True},
         "gpt-4o-mini": {"max_tokens": 16384, "supports_tools": True},
+        "gpt-4.1-mini": {"max_tokens": 16384, "supports_tools": True},
+        "gpt-5-mini": {"max_tokens": 16384, "supports_tools": True},
         "gpt-4-turbo": {"max_tokens": 4096, "supports_tools": True},
         "gpt-3.5-turbo": {"max_tokens": 4096, "supports_tools": True},
     }
