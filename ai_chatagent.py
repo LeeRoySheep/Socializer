@@ -279,14 +279,23 @@ class UserPreferenceTool(BaseTool):
         return self._run(*args, **kwargs)
 
 
+class SkillEvaluatorInput(BaseModel):
+    """Input schema for SkillEvaluator - Gemini compatible."""
+    user_id: int = Field(description="The ID of the user to evaluate")
+    message: Optional[str] = Field(default=None, description="Single message to evaluate")
+    messages: Optional[List[str]] = Field(default=None, description="List of messages to evaluate")
+    cultural_context: Optional[str] = Field(default="Western", description="User's cultural background")
+    use_web_research: Optional[bool] = Field(default=True, description="Whether to fetch latest research")
+
 class SkillEvaluator(BaseTool):
     """Evaluates user skills based on chat interactions and manages training."""
 
     name: str = "skill_evaluator"
     description: str = (
         "Evaluate user skills based on chat interactions and manage training. "
-        "Input should be a JSON object with 'user_id' (int) and 'message' (string) or 'messages' (array of messages)."
+        "Analyzes messages for active listening, empathy, clarity, and engagement."
     )
+    args_schema: Type[BaseModel] = SkillEvaluatorInput
     dm: DataManager = None
     orchestrator: Optional[SkillEvaluationOrchestrator] = None
     skills: Dict[str, Dict[str, Any]] = {}
@@ -1195,24 +1204,13 @@ class AiChatagent:
         
         if is_gemini:
             # Gemini has stricter tool schema requirements
-            # Use only tools with explicit, simple schemas
-            gemini_compatible_tools = []
-            for tool in tool_list:
-                tool_name = getattr(tool, 'name', '')
-                # Include tools with proper args_schema defined
-                if tool_name in ['tavily_search', 'format_output', 'user_preference', 'clarify_communication']:
-                    gemini_compatible_tools.append(tool)
-            
-            if gemini_compatible_tools:
-                print(f"⚠️  Gemini detected - using {len(gemini_compatible_tools)} compatible tools")
-                try:
-                    self.llm_with_tools = llm.bind_tools(gemini_compatible_tools)
-                except Exception as e:
-                    print(f"⚠️  Gemini tool binding failed: {e}")
-                    print("⚠️  Using Gemini without tools")
-                    self.llm_with_tools = llm
-            else:
-                print("⚠️  Gemini: No compatible tools, using without tools")
+            # All tools now have proper args_schema defined!
+            print(f"✅ Gemini detected - using ALL {len(tool_list)} tools (now compatible!)")
+            try:
+                self.llm_with_tools = llm.bind_tools(tool_list)
+            except Exception as e:
+                print(f"⚠️  Gemini tool binding failed: {e}")
+                print("⚠️  Using Gemini without tools")
                 self.llm_with_tools = llm
         else:
             # OpenAI, Claude, etc - use all tools
