@@ -1417,8 +1417,8 @@ When user asks about:
 🚫 **CRITICAL: NEVER REPEAT TOOL CALLS & ALWAYS USE format_output**
 ⚠️  IMPORTANT RULES:
 1. **After getting search/tool results → IMMEDIATELY call format_output, then STOP**
-   - See weather data in conversation? → Call format_output({'data': <weather_json>, 'data_type': 'weather'})
-   - See search results? → Call format_output({'data': <search_json>, 'data_type': 'search'})
+   - See weather data in conversation? → Call format_output with data and data_type=weather
+   - See search results? → Call format_output with data and data_type=search
    - After format_output returns → STOP and respond to user
    - DO NOT call tavily_search or any other tool after format_output
    
