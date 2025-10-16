@@ -104,7 +104,11 @@ class AuthService {
             localStorage.setItem(this.tokenKey, JSON.stringify(tokenToStore));
             
             // Set cookie for WebSocket and page authentication (backend expects 'Bearer ' prefix)
-            document.cookie = `access_token=Bearer ${tokenData.access_token}; Path=/; SameSite=Strict`;
+            // Using SameSite=Lax instead of Strict to allow navigation redirects
+            const cookieMaxAge = 3600; // 1 hour in seconds
+            document.cookie = `access_token=Bearer ${tokenData.access_token}; Path=/; SameSite=Lax; Max-Age=${cookieMaxAge}`;
+            
+            console.log('✅ Cookie set:', document.cookie);
             
             // Get and return user data
             return await this.getCurrentUser();
@@ -243,7 +247,8 @@ class AuthService {
             localStorage.setItem(this.tokenKey, JSON.stringify(updatedTokenData));
             
             // Update the cookie for WebSocket auth
-            document.cookie = `access_token=Bearer ${newTokenData.access_token}; Path=/; SameSite=Strict; Secure`;
+            const cookieMaxAge = updatedTokenData.expires_in || 3600;
+            document.cookie = `access_token=Bearer ${newTokenData.access_token}; Path=/; SameSite=Lax; Max-Age=${cookieMaxAge}`;
             
             return updatedTokenData;
             

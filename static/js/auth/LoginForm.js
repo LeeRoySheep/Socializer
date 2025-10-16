@@ -42,10 +42,24 @@ export class LoginForm {
             const loginResult = await authService.login(username, password);
             console.log('Login successful, redirecting...', loginResult);
             
-            // Add a small delay to ensure all storage operations complete
-            setTimeout(() => {
+            // Add a delay to ensure cookie is properly set before redirect
+            // This is critical - the cookie must be available when the next page loads
+            console.log('Waiting for cookie to be set...');
+            await new Promise(resolve => setTimeout(resolve, 200));
+            
+            console.log('Cookies before redirect:', document.cookie);
+            
+            // Verify cookie was set
+            const cookieSet = document.cookie.includes('access_token');
+            if (cookieSet) {
+                console.log('✅ Cookie verified, redirecting to /chat');
                 window.location.href = '/chat';
-            }, 100);
+            } else {
+                console.warn('⚠️ Cookie not set, using URL token as fallback');
+                // Fallback: pass token via URL if cookie fails
+                const tokenData = JSON.parse(localStorage.getItem('auth_token'));
+                window.location.href = `/chat?token=${tokenData.access_token}`;
+            }
             
         } catch (error) {
             console.error('Login error:', error);
