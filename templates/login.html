@@ -36,9 +36,53 @@
     </form>
 </div>
 
-<script type="module" src="{{ url_for('static', path='/js/auth/index.js') }}"></script>
+<!-- CRITICAL FIX: Inline cookie fix (overrides cached JS) -->
+<script>
+console.log('🔧 Inline cookie fix loaded');
+
+// Override fetch to intercept /token response
+const originalFetch = window.fetch;
+window.fetch = async function(...args) {
+    const response = await originalFetch.apply(this, args);
+    
+    // If this is a token request, set the cookie immediately
+    if (args[0] && args[0].includes('/token')) {
+        console.log('🔍 Intercepted /token request');
+        
+        const clonedResponse = response.clone();
+        const data = await clonedResponse.json();
+        
+        if (data.access_token) {
+            console.log('✅ Token received, setting cookie NOW');
+            
+            // Set cookie with proper settings
+            const cookieValue = `access_token=Bearer ${data.access_token}`;
+            const cookieOptions = 'Path=/; SameSite=Lax; Max-Age=3600';
+            const fullCookie = `${cookieValue}; ${cookieOptions}`;
+            
+            document.cookie = fullCookie;
+            console.log('✅ Cookie set:', fullCookie);
+            console.log('✅ Verify cookie:', document.cookie);
+            
+            // Also store in localStorage as backup
+            localStorage.setItem('auth_token', JSON.stringify({
+                access_token: data.access_token,
+                token_type: 'bearer',
+                created_at: Math.floor(Date.now() / 1000)
+            }));
+            console.log('✅ LocalStorage backup saved');
+        }
+    }
+    
+    return response;
+};
+
+console.log('✅ Fetch interceptor installed');
+</script>
+
+<script type="module" src="{{ url_for('static', path='/js/auth/index.js') }}?v={{ request.headers.get('cache-bust', '20251016') }}"></script>
 <!-- Development test script - Remove in production -->
-<script type="module" src="{{ url_for('static', path='/js/tests/authFlowTest.js') }}"></script>
+<script type="module" src="{{ url_for('static', path='/js/tests/authFlowTest.js') }}?v={{ request.headers.get('cache-bust', '20251016') }}"></script>
 <script>
     document.addEventListener('DOMContentLoaded', () => {
         const urlParams = new URLSearchParams(window.location.search);
