@@ -78,6 +78,15 @@ from typing import Type
 # ConversationRecallTool has been extracted to tools/conversation_recall_tool.py
 
 
+class UserPreferenceInput(BaseModel):
+    """Input schema for UserPreferenceTool - Gemini compatible."""
+    action: str = Field(description="Action to perform: get, set, or delete")
+    user_id: int = Field(description="The ID of the user")
+    preference_type: Optional[str] = Field(default=None, description="Category of preference")
+    preference_key: Optional[str] = Field(default=None, description="Specific preference key")
+    preference_value: Optional[str] = Field(default=None, description="Value to set")
+    confidence: Optional[float] = Field(default=None, description="Confidence score 0-1")
+
 class UserPreferenceTool(BaseTool):
     """Tool for managing user preferences with encryption for sensitive data."""
     
@@ -85,10 +94,9 @@ class UserPreferenceTool(BaseTool):
     description: str = (
         "Manage user preferences (ENCRYPTED). "
         "Use this tool to get, set, or delete user preferences. "
-        "Personal data (name, DOB, sensitive info) is automatically encrypted. "
-        "Input should be a JSON object with 'action' (get/set/delete), 'user_id' (int), "
-        "and other relevant fields based on the action."
+        "Personal data (name, DOB, sensitive info) is automatically encrypted."
     )
+    args_schema: Type[BaseModel] = UserPreferenceInput
     dm: DataManager = None
     encryptor: Optional[Any] = None  # Properly declare for Pydantic
     
@@ -627,22 +635,20 @@ from langchain.chat_models import init_chat_model
 from langchain_core.messages import AIMessage, SystemMessage, ToolMessage, HumanMessage
 
 class LifeEventInput(BaseModel):
-    """Input model for life event operations."""
-    action: str = Field(..., description="Action to perform: 'add', 'get', 'update', 'delete', 'list', 'timeline'")
-    event_id: Optional[int] = Field(None, description="ID of the event (required for get/update/delete)")
-    event_type: Optional[str] = Field(None, description="Type of the event")
-    title: Optional[str] = Field(None, description="Title of the event")
-    description: Optional[str] = Field(None, description="Detailed description of the event")
-    start_date: Optional[Union[datetime, date, str]] = Field(None, description="When the event started (YYYY-MM-DD or ISO format)")
-    end_date: Optional[Union[datetime, date, str]] = Field(None, description="When the event ended (for events with duration)")
-    location: Optional[str] = Field(None, description="Where the event occurred")
-    people_involved: Optional[List[str]] = Field(None, description="List of people involved")
-    impact_level: Optional[int] = Field(None, description="Importance level from 1-10")
-    is_private: Optional[bool] = Field(True, description="Whether the event is private")
-    tags: Optional[List[str]] = Field(None, description="Tags for categorization")
-    metadata: Optional[Dict[str, Any]] = Field(None, description="Additional metadata")
-    limit: Optional[int] = Field(50, description="Maximum number of events to return")
-    offset: Optional[int] = Field(0, description="Offset for pagination")
+    """Input model for life event operations - Gemini compatible."""
+    action: str = Field(description="Action to perform: add, get, update, delete, list, timeline")
+    user_id: int = Field(description="ID of the user")
+    event_id: Optional[int] = Field(default=None, description="ID of the event")
+    event_type: Optional[str] = Field(default=None, description="Type of the event")
+    title: Optional[str] = Field(default=None, description="Title of the event")
+    description: Optional[str] = Field(default=None, description="Detailed description")
+    start_date: Optional[str] = Field(default=None, description="When event started YYYY-MM-DD")
+    end_date: Optional[str] = Field(default=None, description="When event ended YYYY-MM-DD")
+    location: Optional[str] = Field(default=None, description="Where event occurred")
+    impact_level: Optional[int] = Field(default=None, description="Importance level 1-10")
+    is_private: Optional[bool] = Field(default=True, description="Whether event is private")
+    limit: Optional[int] = Field(default=50, description="Maximum events to return")
+    offset: Optional[int] = Field(default=0, description="Offset for pagination")
 
     @field_validator('start_date', 'end_date', mode='before')
     @classmethod
