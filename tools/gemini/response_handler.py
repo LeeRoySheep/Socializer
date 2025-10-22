@@ -352,12 +352,13 @@ class GeminiResponseHandler:
                     title = item.get('title', item.get('name', 'Result'))
                     content = item.get('content', item.get('snippet', item.get('description', '')))
                     
-                    # Truncate content
-                    if content and len(content) > 150:
-                        content = content[:150] + "..."
-                    
+                    # Don't truncate - LLM needs full data to interpret
+                    # (weather data, dates, numbers are important)
                     parts.append(f"\n{i}. {title}")
                     if content:
+                        # Keep full content (max 500 chars for reasonable limit)
+                        if len(content) > 500:
+                            content = content[:500] + "..."
                         parts.append(f"   {content}")
                 elif isinstance(item, str):
                     # Just a string result

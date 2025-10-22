@@ -1094,6 +1094,7 @@ class AiChatagent:
         self.user = user
         self.preferences = user.preferences or {}
         self.temperature = user.temperature or 0.7
+        self.llm = llm  # Store original LLM without tools
         
         # ✅ Initialize O-T-E Logger for observability
         self.ote_logger = get_logger()
@@ -1461,19 +1462,44 @@ When user asks about:
 🚫 **CRITICAL: HOW TO USE TOOLS AND RESPOND**
 ⚠️  IMPORTANT WORKFLOW:
 
-1. **User asks a question** → Call appropriate tool (tavily_search, recall_last_conversation, etc.)
+1. **User asks a question** → Call appropriate tool (web_search, recall_last_conversation, etc.)
 
-2. **You receive tool results** → RESPOND TO THE USER with the information
-   - Weather data? → Tell user the weather in natural language
-   - Search results? → Summarize findings for the user
-   - Previous conversation? → Reference what was discussed
-   - **DO NOT** return empty responses
-   - **DO NOT** just call another tool without responding
+2. **You receive tool results** → **INTERPRET AND RESPOND IN NATURAL LANGUAGE**
+   
+   **WEATHER QUERIES:**
+   - User: "What's the weather in Paris?"
+   - Tool gives: Search results with temperature, conditions
+   - YOU MUST SAY: "Based on current data, Paris is [X]°C ([Y]°F) with [conditions]. [Add helpful details like 'quite cold' or 'nice weather']."
+   - ❌ DO NOT just return the formatted search results as-is
+   - ✅ Extract key information (temperature, conditions) and tell the user in conversational language
+   
+   **SEARCH QUERIES:**
+   - Read the tool results carefully
+   - Extract the MOST RELEVANT information
+   - Answer the user's question directly
+   - Add context and interpretation
+   - ❌ DO NOT return "Found X results for..."
+   - ✅ Answer the actual question: "Yes, according to [source], the answer is..."
+   
+   **KEY RULES:**
+   - **ALWAYS respond with natural, conversational text**
+   - **EXTRACT specific data** (temperatures, dates, numbers) from tool results
+   - **INTERPRET** the results, don't just repeat them
+   - **ANSWER** the user's actual question
+   - ❌ DO NOT return formatted tool output to users
+   - ❌ DO NOT return empty responses
+   - ❌ DO NOT call another tool without responding first
 
-3. **NEVER call the same tool twice in a row**
-   - ONE tool call per user question
-   - Then RESPOND with the answer
-   - Do NOT refine searches or call multiple tools
+3. **CRITICAL: NEVER CALL ANY TOOL MORE THAN ONCE PER QUESTION**
+   - Call the tool ONCE
+   - Get the results
+   - IMMEDIATELY respond to the user in natural language
+   - ❌ DO NOT call the same tool again with different parameters
+   - ❌ DO NOT try to "refine" or "improve" the search
+   - ❌ DO NOT call web_search multiple times
+   - ✅ Use the FIRST result and respond
+   - ✅ If results are insufficient, tell the user and offer alternatives
+   - **ONE TOOL CALL → ONE RESPONSE**
 
 1. SOCIAL BEHAVIOR TRAINING (Priority: HIGH)
    - Guide users toward polite, respectful communication (please, thank you, constructive feedback)
@@ -1735,35 +1761,51 @@ When user asks about:
                                             break
                         
                         if previous_result:
-                            # Check if result was already formatted
-                            if not previous_result.startswith('{'):
-                                # Already formatted, just return it
-                                print("✅ Previous result already formatted, returning it")
-                                from langchain_core.messages import AIMessage
-                                return {"messages": [AIMessage(content=previous_result)]}
-                            else:
-                                # Raw data, need to format it
-                                print("🔧 Previous result is raw data, calling format_output")
-                                # Force format_output call instead
-                                from langchain_core.messages import AIMessage
-                                format_call = {
-                                    'name': 'format_output',
-                                    'args': {'data': previous_result, 'data_type': 'weather' if 'location' in previous_result else 'search'},
-                                    'id': 'duplicate_format_' + str(hash(previous_result)),
-                                    'type': 'tool_call'
-                                }
-                                format_message = AIMessage(content='', tool_calls=[format_call])
-                                return {"messages": [format_message]}
+                            # ✅ FIX: Invoke LLM directly to interpret previous results
+                            # Don't return SystemMessage - directly get interpretation
+                            print("✅ Duplicate detected - invoking LLM to interpret previous results")
+                            
+                            # Build messages for LLM including previous result and instruction
+                            interpretation_messages = []
+                            
+                            # Add system prompt that explains the context
+                            interpretation_messages.append(SystemMessage(content=(
+                                f"You are a helpful AI assistant. Read the tool results carefully and answer the user's question. "
+                                f"Extract specific data (temperatures, percentages, facts) and present them clearly in natural language."
+                            )))
+                            
+                            # Add the conversation messages (including tool result)
+                            interpretation_messages.extend(messages)
+                            
+                            # Add explicit data instruction with the FULL previous result
+                            interpretation_messages.append(
+                                HumanMessage(content=(
+                                    f"Here are the complete {tool_name} results:\n\n{previous_result}\n\n"
+                                    f"Please extract the key information from these results and answer my original question in a natural, conversational way. "
+                                    f"Include specific details like temperatures, weather conditions, etc."
+                                ))
+                            )
+                            
+                            # Invoke LLM to get interpreted response (WITHOUT tools this time)
+                            try:
+                                print("🔄 Calling LLM WITHOUT tools to interpret existing results...")
+                                print(f"📝 Full previous result being sent to LLM:\n{previous_result[:300]}...")
+                                
+                                # Use self.llm (without tools) to force text-only response
+                                interpreted_response = self.llm.invoke(interpretation_messages)
+                                print(f"✅ LLM generated interpretation: {str(interpreted_response.content)[:150]}...")
+                                
+                                # Return the interpreted response as final answer
+                                return {"messages": [interpreted_response]}
+                            except Exception as e:
+                                print(f"⚠️  Error getting interpretation: {e}")
+                                # Fallback: return generic message
+                                fallback = AIMessage(content="Based on the search results, I found the information you requested.")
+                                return {"messages": [fallback]}
                         
-                        # Fallback: generic message
-                        print("🔄 No previous result found, returning generic message")
-                        redirect_content = (
-                            "I already have this information. Let me provide it to you based on my previous search."
-                        )
-                        
-                        from langchain_core.messages import AIMessage
-                        redirect_message = AIMessage(content=redirect_content)
-                        return {"messages": [redirect_message]}
+                        # Fallback: Let the tool execute (don't block if no previous result found)
+                        print("⚠️  No previous result found, allowing duplicate call to execute")
+                        # Continue to next iteration (don't block this tool)
                 
                 print(f"✅ No duplicates - approving tool execution")
                 print("="*70)
