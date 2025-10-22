@@ -46,6 +46,9 @@ logger = logging.getLogger(__name__)
 # JWT settings - import from config (environment-based)
 from .config import SECRET_KEY, ALGORITHM, ACCESS_TOKEN_EXPIRE_MINUTES
 
+# Token Manager - Secure OOP token handling
+from app.auth import get_token_manager
+
 # Password hashing
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
@@ -336,6 +339,7 @@ class RegisterResponse(BaseModel):
 # Authentication routes
 @app.post("/token", response_model=Token)
 async def login_for_access_token(
+    response: Response,  # Added for cookie setting
     form_data: OAuth2PasswordRequestForm = Depends(),
     db: Session = Depends(get_db)
 ):
@@ -345,8 +349,9 @@ async def login_for_access_token(
     - **username**: The user's username
     - **password**: The user's password
     
-    Returns an access token that can be used for authenticated requests.
+    Returns an access token AND sets secure HTTP-only cookie.
     """
+    # Authenticate user
     user = authenticate_user(db, form_data.username, form_data.password)
     if not user:
         raise HTTPException(
@@ -354,11 +359,20 @@ async def login_for_access_token(
             detail="Incorrect username or password",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-    access_token = create_access_token(
-        data={"sub": user.username}, 
-        expires_delta=access_token_expires
+    
+    # ✅ STEP 1: Use TokenManager to create token
+    token_manager = get_token_manager()
+    access_token = token_manager.create_token(
+        username=user.username,
+        user_id=user.id  # Include user_id for better tracking
     )
+    
+    # ✅ STEP 1: Set secure HTTP-only cookie automatically
+    token_manager.set_token_cookie(response, access_token)
+    
+    print(f"✅ Token created for user: {user.username}")
+    print(f"✅ Cookie set with secure settings")
+    
     return {"access_token": access_token, "token_type": "bearer"}
 
 @app.post("/logout")
@@ -370,39 +384,30 @@ async def logout(request: Request, response: Response, db: Session = Depends(get
     Returns a success message and clears the authentication cookie.
     """
     try:
-        # Get the token from the Authorization header or cookie
-        auth_header = request.headers.get("Authorization")
-        if auth_header and auth_header.startswith("Bearer "):
-            token = auth_header.split(" ")[1]
-        else:
-            token = request.cookies.get("access_token")
+        # ✅ STEP 3: Use TokenManager to get token
+        token_manager = get_token_manager()
+        token = token_manager.get_token_from_request(request)
         
         # Add token to blacklist if it exists
         if token:
-            if token.startswith("Bearer "):
-                token = token[7:]  # Remove 'Bearer ' prefix
-            # Add to blacklist with expiration time
             TOKEN_BLACKLIST.add(token)
+            print(f"✅ Token blacklisted for logout")
             
-            # Invalidate the token in the database (if you have such functionality)
-            # This is where you'd add code to invalidate the token in your database
-            
-        # Create a response that will clear the cookie
-        response = JSONResponse(
+        # Create response
+        response_obj = JSONResponse(
             content={"message": "Successfully logged out"},
             status_code=200
         )
         
-        # Clear the access token cookie
-        response.delete_cookie(
-            key="access_token",
-            httponly=True,
-            samesite="lax",
-            secure=False  # Set to True in production with HTTPS
-        )
+        # ✅ STEP 3: Use TokenManager to clear cookie
+        token_manager.clear_token_cookie(response_obj)
         
         # Also clear any other auth-related cookies
-        response.delete_cookie("logged_in")
+        response_obj.delete_cookie("logged_in")
+        
+        print(f"✅ User logged out, cookies cleared")
+        
+        return response_obj
         
         # Clean up any remaining WebSocket connections for this user
         if hasattr(request.state, 'username'):
@@ -1224,111 +1229,63 @@ async def chat_page(
     print(f"[DEBUG] Cookies: {request.cookies}")
     
     try:
-        # Try to get token from URL first
-        token = request.query_params.get("token")
-        token_source = "URL"
+        # ✅ STEP 2: Use TokenManager to extract & validate token
+        # This checks header, query param, AND cookie automatically!
+        token_manager = get_token_manager()
+        token_data = token_manager.validate_request(request)
         
-        # If no token in URL, try to get it from cookies
-        if not token:
-            print("[DEBUG] No token in URL, checking cookies...")
-            token = request.cookies.get("access_token") or request.cookies.get("token")
-            token_source = "cookie"
-            
-            # If token is in Bearer format, extract it
-            if token and token.startswith("Bearer "):
-                print("[DEBUG] Found Bearer token, extracting...")
-                token = token[7:]  # Remove 'Bearer ' prefix
+        print(f"✅ Token validated for user: {token_data.username}")
+        if token_data.user_id:
+            print(f"✅ User ID from token: {token_data.user_id}")
         
-        # Check if token exists
-        if not token:
-            print("[ERROR] No token found in request")
-            print(f"[DEBUG] All cookies: {request.cookies}")
-            return RedirectResponse(url="/login")
-            
-        print(f"[DEBUG] Token found in {token_source}")
-        print(f"[DEBUG] Token length: {len(token) if token else 0} characters")
-            
-        try:
-            print("[DEBUG] Attempting to verify token...")
-            # Verify the token
-            payload = jwt.decode(
-                token, 
-                SECRET_KEY, 
-                algorithms=[ALGORITHM],
-                options={"verify_exp": True}
-            )
-            
-            username: str = payload.get("sub")
-            if not username:
-                print("[ERROR] No username in token payload")
-                print(f"[DEBUG] Token payload: {payload}")
-                raise HTTPException(status_code=400, detail="Invalid token")
-                
-            print(f"[DEBUG] Successfully authenticated as user: {username}")
-            
-            # Get user from database
-            print(f"[DEBUG] Fetching user from database: {username}")
-            user = db.query(User).filter(User.username == username).first()
-            if not user:
-                print(f"[ERROR] User not found in database: {username}")
-                raise HTTPException(status_code=404, detail="User not found")
-                
-            # Prepare user data for the template
-            user_data = {
-                "id": user.id,
-                "username": user.username,
-                "email": getattr(user, 'email', ''),
-                "is_active": user.is_active,
-                "role": getattr(user, 'role', 'user'),
-                "created_at": user.created_at.isoformat() if hasattr(user, 'created_at') and user.created_at else None
+        # Get user from database
+        user = db.query(User).filter(User.username == token_data.username).first()
+        if not user:
+            print(f"[ERROR] User not found in database: {token_data.username}")
+            return RedirectResponse(url="/login?error=User+not+found")
+        
+        # Prepare user data for the template
+        user_data = {
+            "id": user.id,
+            "username": user.username,
+            "email": getattr(user, 'email', ''),
+            "is_active": user.is_active,
+            "role": getattr(user, 'role', 'user'),
+            "created_at": user.created_at.isoformat() if hasattr(user, 'created_at') and user.created_at else None
+        }
+        
+        print(f"[DEBUG] User data prepared: {user_data}")
+        
+        # Generate a unique client ID for this session
+        import uuid
+        client_id = str(uuid.uuid4())
+        
+        # Create WebSocket URL
+        ws_scheme = 'wss' if request.url.scheme == 'https' else 'ws'
+        ws_url = f"{ws_scheme}://{request.url.hostname}:{request.url.port}/ws/chat"
+        
+        # Get the token string for template
+        token_string = token_manager.get_token_from_request(request)
+        
+        # Create response with the new chat template
+        response_obj = templates.TemplateResponse(
+            "new-chat.html", 
+            {
+                "request": request,
+                "current_user": user_data,
+                "ws_url": ws_url,
+                "access_token": token_string,
+                "token": token_string  # For backward compatibility
             }
-            
-            print(f"[DEBUG] User data prepared: {user_data}")
-            
-            # Generate a unique client ID for this session
-            import uuid
-            client_id = str(uuid.uuid4())
-            
-            # Create WebSocket URL
-            ws_scheme = 'wss' if request.url.scheme == 'https' else 'ws'
-            ws_url = f"{ws_scheme}://{request.url.hostname}:{request.url.port}/ws/chat"
-            
-            # Create response with the new chat template
-            response = templates.TemplateResponse(
-                "new-chat.html", 
-                {
-                    "request": request,
-                    "current_user": user_data,
-                    "ws_url": ws_url,
-                    "access_token": token,  # Pass the token to the template
-                    "token": token  # Also pass as 'token' for backward compatibility
-                }
-            )
-            
-            # Refresh the token to extend session
-            access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-            new_token = create_access_token(
-                data={"sub": user.username},
-                expires_delta=access_token_expires
-            )
-            
-            # Set the new token in the cookie
-            response.set_cookie(
-                key="access_token",
-                value=f"Bearer {new_token}",
-                httponly=True,
-                max_age=ACCESS_TOKEN_EXPIRE_MINUTES * 60,
-                samesite='lax',
-                secure=request.url.scheme == 'https'
-            )
-            
-            return response
-            
-        except JWTError as e:
-            print(f"[CHAT] Token validation failed: {str(e)}")
-            response = RedirectResponse(url="/login")
-            response.delete_cookie("access_token")
-            return response
+        )
+        
+        # ✅ STEP 2: Refresh token and set cookie automatically
+        new_token = token_manager.refresh_token(token_string)
+        token_manager.set_token_cookie(response_obj, new_token)
+        
+        print(f"✅ Token refreshed and cookie updated")
+        
+        return response_obj
             
     except HTTPException as e:
         print(f"[CHAT] HTTP Error: {str(e)}")
