@@ -1082,124 +1082,8 @@ class AiChatagent:
         self.user_preference_tool = UserPreferenceTool(dm)
         self.clarify_tool = ClarifyCommunicationTool()
         
-        # Initialize tools configuration for LLM
-        self.tools = [
-            {
-                "name": "tavily_search",
-                "description": "Search the web for information",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "query": {"type": "string", "description": "The search query"}
-                    },
-                    "required": ["query"],
-                },
-            },
-            {
-                "name": "recall_last_conversation",
-                "description": "Recall the last conversation from memory. Use this when the user asks about previous conversations or context.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "user_id": {
-                            "type": "integer",
-                            "description": "The ID of the user whose conversation to retrieve",
-                        }
-                    },
-                    "required": ["user_id"],
-                },
-            },
-            {
-                "name": "skill_evaluator",
-                "description": "Evaluate user skills based on chat interactions and manage training.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "user_id": {
-                            "type": "integer",
-                            "description": "The ID of the user whose skills to evaluate",
-                        },
-                        "message": {
-                            "type": "string",
-                            "description": "The user's message to evaluate",
-                        },
-                    },
-                    "required": ["user_id", "message"],
-                },
-            },
-            {
-                "name": "format_output",
-                "description": "Format raw data (JSON, dicts, API responses) into beautiful human-readable text. ALWAYS use this when you receive raw JSON or dict data from other tools before showing it to users.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "data": {
-                            "type": "string",
-                            "description": "The raw data to format (JSON string or dict)",
-                        },
-                        "data_type": {
-                            "type": "string",
-                            "description": "Type of data: 'weather', 'search', 'conversation', or 'auto' (default)",
-                            "enum": ["weather", "search", "conversation", "auto"],
-                        },
-                    },
-                    "required": ["data"],
-                },
-            },
-            {
-                "name": "user_preference",
-                "description": "Save and retrieve personal user data like name, DOB, interests, skills, preferences. Use this to remember important information about the user.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "action": {
-                            "type": "string",
-                            "description": "Action to perform: 'get', 'set', or 'delete'",
-                            "enum": ["get", "set", "delete"],
-                        },
-                        "user_id": {
-                            "type": "integer",
-                            "description": "The user ID",
-                        },
-                        "preference_type": {
-                            "type": "string",
-                            "description": "Category: 'personal_info', 'interests', 'skills', 'preferences'",
-                        },
-                        "preference_key": {
-                            "type": "string",
-                            "description": "Specific key: 'name', 'dob', 'favorite_topic', etc.",
-                        },
-                        "preference_value": {
-                            "type": "string",
-                            "description": "Value to set",
-                        },
-                    },
-                    "required": ["action", "user_id"],
-                },
-            },
-            {
-                "name": "clarify_communication",
-                "description": "Translate foreign languages and clarify misunderstandings between users. Use this when detecting communication barriers, cultural differences, or language issues.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "text": {
-                            "type": "string",
-                            "description": "The text to translate/clarify",
-                        },
-                        "source_language": {
-                            "type": "string",
-                            "description": "Source language (optional, auto-detect)",
-                        },
-                        "target_language": {
-                            "type": "string",
-                            "description": "Target language (default: English)",
-                        },
-                    },
-                    "required": ["text"],
-                },
-            },
-        ]
+        # ✅ self.tools will be generated from actual tool instances later
+        # This ensures names always match what's bound to the LLM
         
         # ===================================================================
         # 🚀 NEW: Universal Tool Management (works with ALL LLM providers)
@@ -1257,6 +1141,16 @@ class AiChatagent:
         
         # Create mapping for backward compatibility
         self.tool_instances = {tool.name: tool for tool in tool_list}
+        
+        # ✅ Generate self.tools from actual tool instances (for logging/debugging)
+        # This ensures names always match what's actually available
+        self.tools = [
+            {
+                "name": tool.name,
+                "description": tool.description if hasattr(tool, 'description') else ""
+            }
+            for tool in tool_list
+        ]
         
         print(f"🔧 Total tools available: {len(tool_list)}")
         print(f"   Tool names: {list(self.tool_instances.keys())}")
