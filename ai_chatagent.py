@@ -401,19 +401,52 @@ class SkillEvaluator(BaseTool):
                 except Exception as e:
                     print(f"Web research failed: {e}")
             
-            # Get current skill levels
-            current_skills = self.get_skill_suggestions(user_id)
+            # Get current skill levels BEFORE analysis
+            current_skills_before = self.get_skill_suggestions(user_id)
             
             # Analyze message for skill demonstration
             analysis = self._analyze_message_skills(message if isinstance(message, str) else str(messages), cultural_context)
             
+            # ✅ UPDATE DATABASE: Save detected skills to track progress
+            detected_skills = analysis.get('detected_skills', [])
+            skills_updated = []
+            
+            if detected_skills:
+                for skill_name in detected_skills:
+                    try:
+                        # Get or create the skill
+                        skill = self.dm.get_or_create_skill(skill_name)
+                        if skill:
+                            # Get current level
+                            current_level = self.dm.get_skilllevel_for_user(user_id, skill.id) or 0
+                            
+                            # Increment level (max 10)
+                            new_level = min(current_level + 1, 10)
+                            
+                            # Update in database
+                            self.dm.set_skill_for_user(user_id, skill, new_level)
+                            skills_updated.append({
+                                "skill": skill_name,
+                                "old_level": current_level,
+                                "new_level": new_level,
+                                "improved": new_level > current_level
+                            })
+                            print(f"✅ Updated {skill_name}: {current_level} → {new_level}")
+                    except Exception as e:
+                        print(f"⚠️ Failed to update skill {skill_name}: {e}")
+            
+            # Get updated skill levels AFTER analysis
+            current_skills_after = self.get_skill_suggestions(user_id)
+            
             return {
                 "status": "success",
-                "message": "Skill evaluation completed with latest research",
-                "current_skills": current_skills,
+                "message": f"Skill evaluation completed with latest research. {len(skills_updated)} skills updated.",
+                "current_skills": current_skills_after,
+                "skills_updated": skills_updated,  # Show what changed
                 "message_analysis": analysis,
                 "latest_standards": latest_standards,
-                "cultural_context": cultural_context
+                "cultural_context": cultural_context,
+                "user_id": user_id
             }
             
         except Exception as e:

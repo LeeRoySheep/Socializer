@@ -261,20 +261,46 @@ class GeminiResponseHandler:
         if result.get('message'):
             parts.append(result['message'])
         
+        # ✅ NEW: Show which skills were updated/improved
+        if result.get('skills_updated'):
+            skills_updated = result['skills_updated']
+            if isinstance(skills_updated, list) and skills_updated:
+                parts.append("\n🎯 Skills Demonstrated:")
+                for update in skills_updated[:5]:  # Show top 5
+                    if isinstance(update, dict):
+                        skill = update.get('skill', 'Unknown')
+                        old = update.get('old_level', 0)
+                        new = update.get('new_level', 0)
+                        improved = update.get('improved', False)
+                        
+                        if improved:
+                            parts.append(f"  ✅ {skill}: {old} → {new} (Improved!)")
+                        else:
+                            parts.append(f"  • {skill}: {new}/10 (Max reached)")
+        
         # Current skills (handle both dict and list formats)
         if result.get('current_skills'):
-            parts.append("\n📊 Current Skill Levels:")
+            parts.append("\n📊 Overall Skill Levels:")
             skills = result['current_skills']
             
             if isinstance(skills, dict):
                 for skill, score in skills.items():
                     parts.append(f"  • {skill}: {score}/100")
             elif isinstance(skills, list):
-                for skill_obj in skills:
+                for skill_obj in skills[:5]:  # Show top 5
                     if isinstance(skill_obj, dict):
-                        name = skill_obj.get('name', 'Unknown')
-                        score = skill_obj.get('score', 0)
-                        parts.append(f"  • {name}: {score}/100")
+                        name = skill_obj.get('skill', skill_obj.get('name', 'Unknown'))
+                        level = skill_obj.get('current_level', skill_obj.get('score', 0))
+                        feedback = skill_obj.get('feedback', '')
+                        parts.append(f"  • {name}: {level}/10 {feedback}")
+        
+        # Message analysis (what was detected in this specific message)
+        if result.get('message_analysis'):
+            analysis = result['message_analysis']
+            if isinstance(analysis, dict):
+                detected = analysis.get('detected_skills', [])
+                if detected:
+                    parts.append(f"\n✨ Detected in your message: {', '.join(detected)}")
         
         # Suggestions (limit to 3 most important)
         if result.get('suggestions'):
@@ -290,11 +316,10 @@ class GeminiResponseHandler:
                     parts.append(f"  • {text}")
         
         # Research info (if available)
-        if result.get('latest_research'):
-            research = result['latest_research']
+        if result.get('latest_standards'):
+            research = result['latest_standards']
             if isinstance(research, dict):
-                year = research.get('year', 2025)
-                parts.append(f"\n🔬 Based on latest {year} research")
+                parts.append(f"\n🔬 Evaluated using latest social skills research")
         
         return "\n".join(parts) if parts else self._format_dict(result, 'skill_evaluator')
     
