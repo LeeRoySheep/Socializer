@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 from datetime import datetime
 
 from app.database import get_db
-from app.auth import get_current_user
+from app.dependencies import get_current_user
 from datamanager.data_manager import DataManager
 from datamanager.data_model import User, ChatRoom, RoomMember, RoomMessage, RoomInvite
 

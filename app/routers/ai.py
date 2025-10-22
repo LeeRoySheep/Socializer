@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 from typing import List, Optional, Dict, Any
 from sqlalchemy.orm import Session
 
-from app.auth import get_current_user
+from app.dependencies import get_current_user
 from app.database import get_db
 from datamanager.data_model import User
 from ai_chatagent import AiChatagent, llm, dm
