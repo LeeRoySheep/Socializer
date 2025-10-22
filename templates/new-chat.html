@@ -879,12 +879,13 @@
                 <!-- LLM Model Switcher -->
                 <div class="llm-switcher-container">
                     <select id="llm-model-selector" class="llm-model-selector" title="Select AI Model">
-                        <optgroup label="☁️ OpenAI Models">
-                            <option value="gpt-4o-mini" selected>GPT-4o Mini (Fast & Cheap)</option>
-                            <option value="gpt-4.1-mini">GPT-4.1 Mini (Better Reasoning)</option>
-                            <option value="gpt-5-mini">GPT-5 Mini (Latest)</option>
-                            <option value="gpt-4o">GPT-4o (Most Capable)</option>
-                            <option value="gpt-4-turbo">GPT-4 Turbo (Advanced)</option>
+                        <optgroup label="☁️ OpenAI Models (Free Tier)">
+                            <option value="gpt-4o-mini" selected>GPT-4o Mini ⚡ RECOMMENDED</option>
+                            <option value="gpt-3.5-turbo">GPT-3.5 Turbo (Fast)</option>
+                        </optgroup>
+                        <optgroup label="☁️ OpenAI Models (Paid Only)">
+                            <option value="gpt-4o">GPT-4o 💰 Requires Paid Account</option>
+                            <option value="gpt-4-turbo">GPT-4 Turbo 💰 Requires Paid Account</option>
                         </optgroup>
                         <optgroup label="🌟 Google Gemini">
                             <option value="gemini-2.0-flash-exp">Gemini 2.0 Flash (FREE! All Tools)</option>
@@ -1246,7 +1247,21 @@
         
         // Export function to get current model
         window.getCurrentLLMModel = function() {
-            return localStorage.getItem(LLM_STORAGE_KEY) || 'gpt-4o-mini';
+            const savedModel = localStorage.getItem(LLM_STORAGE_KEY);
+            
+            // ✅ Validate: If saved model doesn't exist in dropdown, reset to default
+            const modelSelector = document.getElementById('llm-model-selector');
+            if (modelSelector && savedModel) {
+                const modelExists = Array.from(modelSelector.options).some(opt => opt.value === savedModel);
+                if (!modelExists) {
+                    console.warn(`⚠️ Model '${savedModel}' not available, resetting to gpt-4o-mini`);
+                    localStorage.setItem(LLM_STORAGE_KEY, 'gpt-4o-mini');
+                    modelSelector.value = 'gpt-4o-mini';
+                    return 'gpt-4o-mini';
+                }
+            }
+            
+            return savedModel || 'gpt-4o-mini';
         };
     </script>
     
