@@ -412,8 +412,11 @@ class SkillEvaluator(BaseTool):
             skills_updated = []
             
             if detected_skills:
-                for skill_name in detected_skills:
+                for skill_obj in detected_skills:
                     try:
+                        # Extract skill name from dict (detected_skills contains dicts, not strings)
+                        skill_name = skill_obj.get('skill') if isinstance(skill_obj, dict) else str(skill_obj)
+                        
                         # Get or create the skill
                         skill = self.dm.get_or_create_skill(skill_name)
                         if skill:

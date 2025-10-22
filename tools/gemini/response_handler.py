@@ -300,7 +300,15 @@ class GeminiResponseHandler:
             if isinstance(analysis, dict):
                 detected = analysis.get('detected_skills', [])
                 if detected:
-                    parts.append(f"\n✨ Detected in your message: {', '.join(detected)}")
+                    # Handle both string list and dict list formats
+                    skill_names = []
+                    for item in detected:
+                        if isinstance(item, dict):
+                            skill_names.append(item.get('skill', 'Unknown'))
+                        else:
+                            skill_names.append(str(item))
+                    if skill_names:
+                        parts.append(f"\n✨ Detected in your message: {', '.join(skill_names)}")
         
         # Suggestions (limit to 3 most important)
         if result.get('suggestions'):
