@@ -119,13 +119,16 @@ class GeminiResponseHandler:
             if 'error' in tool_result:
                 return f"Error from {tool_name}: {tool_result.get('error', 'Unknown error')}"
             
-            # Data field handling
-            if 'data' in tool_result:
-                return self._format_data(tool_result['data'], tool_name)
-            
-            # ✅ Special handling for skill_evaluator results
+            # ✅ Special handling for specific tools (BEFORE generic data check)
             if tool_name == 'skill_evaluator':
                 return self._format_skill_evaluation(tool_result)
+            
+            if tool_name == 'web_search':
+                return self._format_web_search(tool_result)
+            
+            # Generic data field handling (for tools without special formatting)
+            if 'data' in tool_result:
+                return self._format_data(tool_result['data'], tool_name)
             
             # ✅ For other dicts with status/message, extract key info
             if 'status' in tool_result and 'message' in tool_result:
@@ -294,6 +297,49 @@ class GeminiResponseHandler:
                 parts.append(f"\n🔬 Based on latest {year} research")
         
         return "\n".join(parts) if parts else self._format_dict(result, 'skill_evaluator')
+    
+    def _format_web_search(self, result: dict) -> str:
+        """Format web search results in a clean, concise way."""
+        # Extract key information
+        query = result.get('query', 'search')
+        results_count = result.get('results_count', 0)
+        data = result.get('data', [])
+        
+        # Simple format: just return the search results concisely
+        if not data:
+            return f"No results found for '{query}'"
+        
+        # If data is a list of results
+        if isinstance(data, list):
+            # Format as a simple summary (let LLM describe details)
+            parts = [f"🔍 Found {results_count} results for '{query}':"]
+            
+            for i, item in enumerate(data[:3], 1):  # Show top 3
+                if isinstance(item, dict):
+                    title = item.get('title', item.get('name', 'Result'))
+                    content = item.get('content', item.get('snippet', item.get('description', '')))
+                    
+                    # Truncate content
+                    if content and len(content) > 150:
+                        content = content[:150] + "..."
+                    
+                    parts.append(f"\n{i}. {title}")
+                    if content:
+                        parts.append(f"   {content}")
+                elif isinstance(item, str):
+                    # Just a string result
+                    parts.append(f"\n{i}. {item[:150]}...")
+            
+            if len(data) > 3:
+                parts.append(f"\n... and {len(data) - 3} more results")
+            
+            return "\n".join(parts)
+        
+        # If data is a dict or string, just return it nicely formatted
+        elif isinstance(data, dict):
+            return f"🔍 Search results for '{query}':\n" + self._format_dict(data, 'web_search')
+        else:
+            return f"🔍 Search result for '{query}': {str(data)[:200]}"
     
     def _format_dict(self, data: dict, tool_name: str) -> str:
         """Format a dictionary result in a readable way (not raw string dump)."""
