@@ -923,7 +923,17 @@ class State(TypedDict):
 class BasicToolNode:
     """A node that runs the tools requested in the last AIMessage."""
 
-    def __init__(self, tools: list) -> None:
+    def __init__(self, tools: list, response_handler=None) -> None:
+        """
+        Initialize BasicToolNode.
+        
+        Parameters:
+        -----------
+        tools : list
+            List of tools to make available
+        response_handler : GeminiResponseHandler, optional
+            Response handler for formatting tool results
+        """
         # Create a dictionary of tools by name
         self.tools_by_name = {}
         for tool in tools:
@@ -935,6 +945,9 @@ class BasicToolNode:
             elif hasattr(tool, "__name__"):
                 # Handle function tools
                 self.tools_by_name[tool.__name__] = tool
+        
+        # ✅ Store response handler for formatting
+        self.response_handler = response_handler
 
     def __call__(self, inputs: dict):
         if messages := inputs.get("messages", []):
@@ -981,9 +994,13 @@ class BasicToolNode:
                 else:
                     tool_result = {"error": f"Tool {tool_name} is not callable"}
 
-                # Format the tool result for readability
-                formatted_result = ResponseFormatter.format_tool_result(tool_name, tool_result)
-                formatted_result = ResponseFormatter.clean_response(formatted_result)
+                # ✅ Format the tool result for readability
+                # Use GeminiResponseHandler if available, otherwise fallback to ResponseFormatter
+                if self.response_handler:
+                    formatted_result = self.response_handler.format_tool_result(tool_result, tool_name)
+                else:
+                    formatted_result = ResponseFormatter.format_tool_result(tool_name, tool_result)
+                    formatted_result = ResponseFormatter.clean_response(formatted_result)
                 
                 outputs.append(
                     ToolMessage(
@@ -1941,10 +1958,16 @@ When user asks about:
         # ✅ FIX: Create tool_node with instance tools (includes new SearchTool!)
         # Don't use the global tool_node which has old tools
         instance_tool_list = list(self.tool_instances.values())
-        instance_tool_node = BasicToolNode(tools=instance_tool_list)
+        
+        # ✅ Pass response_handler for beautiful formatting!
+        instance_tool_node = BasicToolNode(
+            tools=instance_tool_list,
+            response_handler=self.response_handler
+        )
         
         print(f"🔧 Building graph with {len(instance_tool_list)} tools:")
         print(f"   {list(self.tool_instances.keys())}")
+        print(f"   Response handler: {'✅ Connected' if self.response_handler else '❌ Not available'}")
         
         # Add nodes
         graph_builder.add_node("chatbot", self.chatbot)
