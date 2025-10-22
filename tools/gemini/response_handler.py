@@ -258,23 +258,42 @@ class GeminiResponseHandler:
         if result.get('message'):
             parts.append(result['message'])
         
-        # Current skills
+        # Current skills (handle both dict and list formats)
         if result.get('current_skills'):
             parts.append("\n📊 Current Skill Levels:")
-            for skill, score in result['current_skills'].items():
-                parts.append(f"  • {skill}: {score}/100")
+            skills = result['current_skills']
+            
+            if isinstance(skills, dict):
+                for skill, score in skills.items():
+                    parts.append(f"  • {skill}: {score}/100")
+            elif isinstance(skills, list):
+                for skill_obj in skills:
+                    if isinstance(skill_obj, dict):
+                        name = skill_obj.get('name', 'Unknown')
+                        score = skill_obj.get('score', 0)
+                        parts.append(f"  • {name}: {score}/100")
         
         # Suggestions (limit to 3 most important)
         if result.get('suggestions'):
             parts.append("\n💡 Suggestions:")
-            for suggestion in result['suggestions'][:3]:
-                parts.append(f"  • {suggestion}")
+            suggestions = result['suggestions']
+            if isinstance(suggestions, list):
+                for suggestion in suggestions[:3]:
+                    # Handle both string and dict suggestions
+                    if isinstance(suggestion, dict):
+                        text = suggestion.get('text') or suggestion.get('suggestion', str(suggestion))
+                    else:
+                        text = str(suggestion)
+                    parts.append(f"  • {text}")
         
         # Research info (if available)
         if result.get('latest_research'):
-            parts.append(f"\n🔬 Based on latest {result['latest_research'].get('year', 2025)} research")
+            research = result['latest_research']
+            if isinstance(research, dict):
+                year = research.get('year', 2025)
+                parts.append(f"\n🔬 Based on latest {year} research")
         
-        return "\n".join(parts) if parts else str(result)
+        return "\n".join(parts) if parts else self._format_dict(result, 'skill_evaluator')
     
     def _format_dict(self, data: dict, tool_name: str) -> str:
         """Format a dictionary result in a readable way (not raw string dump)."""
