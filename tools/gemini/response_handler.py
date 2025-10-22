@@ -115,13 +115,32 @@ class GeminiResponseHandler:
         """
         # Handle dictionary results
         if isinstance(tool_result, dict):
+            # Error handling
             if 'error' in tool_result:
                 return f"Error from {tool_name}: {tool_result.get('error', 'Unknown error')}"
             
+            # Data field handling
             if 'data' in tool_result:
                 return self._format_data(tool_result['data'], tool_name)
             
-            return str(tool_result)
+            # ✅ Special handling for skill_evaluator results
+            if tool_name == 'skill_evaluator':
+                return self._format_skill_evaluation(tool_result)
+            
+            # ✅ For other dicts with status/message, extract key info
+            if 'status' in tool_result and 'message' in tool_result:
+                formatted = f"[{tool_result['status'].upper()}] {tool_result['message']}"
+                
+                # Add any scores or suggestions if present
+                if 'skill_scores' in tool_result:
+                    formatted += f"\n\nSkill Scores: {tool_result['skill_scores']}"
+                if 'suggestions' in tool_result and tool_result['suggestions']:
+                    formatted += f"\n\nSuggestions:\n" + "\n".join(f"- {s}" for s in tool_result['suggestions'][:3])
+                
+                return formatted
+            
+            # ✅ Fallback: Format dict nicely, not as raw string
+            return self._format_dict(tool_result, tool_name)
         
         # Handle string results
         if isinstance(tool_result, str):
@@ -230,6 +249,52 @@ class GeminiResponseHandler:
                     return (None, tool_name)
         
         return None
+    
+    def _format_skill_evaluation(self, result: dict) -> str:
+        """Format skill evaluation results in a clean, readable way."""
+        parts = []
+        
+        # Status and message
+        if result.get('message'):
+            parts.append(result['message'])
+        
+        # Current skills
+        if result.get('current_skills'):
+            parts.append("\n📊 Current Skill Levels:")
+            for skill, score in result['current_skills'].items():
+                parts.append(f"  • {skill}: {score}/100")
+        
+        # Suggestions (limit to 3 most important)
+        if result.get('suggestions'):
+            parts.append("\n💡 Suggestions:")
+            for suggestion in result['suggestions'][:3]:
+                parts.append(f"  • {suggestion}")
+        
+        # Research info (if available)
+        if result.get('latest_research'):
+            parts.append(f"\n🔬 Based on latest {result['latest_research'].get('year', 2025)} research")
+        
+        return "\n".join(parts) if parts else str(result)
+    
+    def _format_dict(self, data: dict, tool_name: str) -> str:
+        """Format a dictionary result in a readable way (not raw string dump)."""
+        if not data:
+            return f"No data from {tool_name}"
+        
+        parts = [f"Results from {tool_name}:"]
+        
+        # Limit to first 5 key-value pairs
+        for key, value in list(data.items())[:5]:
+            # Truncate long values
+            value_str = str(value)
+            if len(value_str) > 100:
+                value_str = value_str[:100] + "..."
+            parts.append(f"  • {key}: {value_str}")
+        
+        if len(data) > 5:
+            parts.append(f"  ... and {len(data) - 5} more fields")
+        
+        return "\n".join(parts)
     
     def create_response_with_fallback(
         self,
