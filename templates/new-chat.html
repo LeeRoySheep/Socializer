@@ -36,10 +36,61 @@
             gap: 1rem;
         }
 
+        .top-header .center-section {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex: 1;
+        }
+
         .top-header .right-section {
             display: flex;
             align-items: center;
             gap: 1rem;
+        }
+
+        /* User Profile Indicator */
+        .user-profile-indicator {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            padding: 0.5rem 1rem;
+            border-radius: 25px;
+            box-shadow: 0 2px 10px rgba(102, 126, 234, 0.3);
+            transition: all 0.3s ease;
+        }
+
+        .user-profile-indicator:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
+        }
+
+        .online-status-dot {
+            width: 10px;
+            height: 10px;
+            background: #10b981;
+            border-radius: 50%;
+            box-shadow: 0 0 10px rgba(16, 185, 129, 0.6);
+            animation: pulse-online 2s infinite;
+        }
+
+        @keyframes pulse-online {
+            0%, 100% {
+                opacity: 1;
+                box-shadow: 0 0 10px rgba(16, 185, 129, 0.6);
+            }
+            50% {
+                opacity: 0.6;
+                box-shadow: 0 0 20px rgba(16, 185, 129, 0.8);
+            }
+        }
+
+        .user-display-name {
+            color: white;
+            font-weight: 600;
+            font-size: 0.9rem;
+            letter-spacing: 0.3px;
         }
 
         .private-chat-btn {
@@ -668,6 +719,27 @@
             .chat-header {
                 padding: 1rem;
             }
+            
+            /* Mobile: Hide center section on very small screens */
+            .top-header .center-section {
+                display: none;
+            }
+            
+            /* Show only on tablet and up */
+            @media (min-width: 576px) {
+                .top-header .center-section {
+                    display: flex;
+                }
+                
+                .user-profile-indicator {
+                    padding: 0.4rem 0.8rem;
+                    font-size: 0.85rem;
+                }
+                
+                .user-display-name {
+                    font-size: 0.85rem;
+                }
+            }
 
             .messages-area {
                 padding: 1rem;
@@ -874,6 +946,13 @@
             <div class="left-section">
                 <h3 style="margin: 0; color: #495057; font-weight: 700;">Socializer Chat</h3>
                 <span class="badge bg-primary" id="online-count">0 online</span>
+            </div>
+            <div class="center-section">
+                <!-- User Profile Indicator -->
+                <div class="user-profile-indicator">
+                    <span class="online-status-dot"></span>
+                    <span class="user-display-name" id="current-user-display">Loading...</span>
+                </div>
             </div>
             <div class="right-section">
                 <!-- LLM Model Switcher -->
@@ -1128,6 +1207,19 @@
         console.log('[TRACE] User data loaded:', {
             username: window.currentUser.username,
             id: window.currentUser.id
+        });
+        
+        // ✅ Update user profile indicator with username
+        document.addEventListener('DOMContentLoaded', function() {
+            const userDisplayElement = document.getElementById('current-user-display');
+            if (userDisplayElement && window.currentUser) {
+                // Format username nicely (capitalize first letter)
+                const username = window.currentUser.username;
+                const displayName = username.charAt(0).toUpperCase() + username.slice(1);
+                userDisplayElement.textContent = `👤 ${displayName}`;
+                userDisplayElement.title = `Logged in as ${username}`;
+                console.log('[INFO] User profile indicator updated:', displayName);
+            }
         });
     </script>
 
