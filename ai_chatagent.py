@@ -19,6 +19,9 @@ from format_tool import FormatTool
 
 # Import extracted tools
 from tools.conversation_recall_tool import ConversationRecallTool
+from tools.gemini.search_tool import SearchTool  # New Gemini-compatible SearchTool
+from tools.gemini import GeminiResponseHandler  # Response handler for empty responses
+from tools.tool_manager import ToolManager  # Universal tool manager for all LLM providers
 
 # Add the project root to the Python path
 project_root = str(Path(__file__).resolve().parent.parent)
@@ -1181,42 +1184,81 @@ class AiChatagent:
             },
         ]
         
-        # Initialize LifeEventTool if DataManager is available
-        self.life_event_tool = LifeEventTool(dm) if 'dm' in globals() else None
+        # ===================================================================
+        # 🚀 NEW: Universal Tool Management (works with ALL LLM providers)
+        # ===================================================================
         
-        # Initialize FormatTool for making output human-readable
-        self.format_tool = FormatTool()
-        
-        # Create a mapping of tool names to their instances
-        self.tool_instances = {
-            "tavily_search": self.tavily_search,
-            "recall_last_conversation": self.conversation_tool,
-            "skill_evaluator": self.skill_evaluator_tool,
-            "user_preference": self.user_preference_tool,
-            "clarify_communication": self.clarify_tool,
-            "life_event": self.life_event_tool if self.life_event_tool else None,
-            "format_output": self.format_tool
-        }
-        
-        # Remove any None values from tool_instances
-        self.tool_instances = {k: v for k, v in self.tool_instances.items() if v is not None}
-        
-        # ✅ FIX: Bind actual tool instances (BaseTool objects) to LLM, not dictionaries!
-        tool_list = list(self.tool_instances.values())
-        
-        # Check if using Gemini (has compatibility issues with some tools)
+        # Detect LLM provider from model name
         llm_model_name = getattr(llm, 'model_name', getattr(llm, 'model', ''))
-        is_gemini = 'gemini' in str(llm_model_name).lower()
+        llm_class_name = llm.__class__.__name__
         
-        if is_gemini:
-            # Gemini has issues generating proper responses after tool calls
-            # Use without tools for now to ensure it responds
-            print(f"⚠️  Gemini detected - using WITHOUT tools due to empty response issue")
-            print(f"   Gemini will answer questions but cannot search web or use tools")
-            self.llm_with_tools = llm
+        # Determine provider
+        if 'gemini' in str(llm_model_name).lower() or 'google' in llm_class_name.lower():
+            provider = "gemini"
+        elif 'claude' in str(llm_model_name).lower() or 'anthropic' in llm_class_name.lower():
+            provider = "claude"
+        elif 'gpt' in str(llm_model_name).lower() or 'openai' in llm_class_name.lower():
+            provider = "openai"
         else:
-            # OpenAI, Claude, etc - use all tools
+            provider = "openai"  # Default fallback
+        
+        print(f"🔧 Detected LLM provider: {provider}")
+        
+        # Initialize ToolManager for this provider
+        self.tool_manager = ToolManager(provider=provider, data_manager=dm)
+        
+        # Get tools optimized for this provider
+        managed_tools = self.tool_manager.get_tools()
+        print(f"🔧 Loaded {len(managed_tools)} tools from ToolManager")
+        
+        # ===================================================================
+        # Backward Compatibility: Keep old tool instances
+        # (These will be gradually migrated to ToolManager)
+        # ===================================================================
+        
+        # Initialize legacy tools that aren't yet in ToolManager
+        self.tavily_search = TavilySearchTool(search_tool=tool_1)  # Legacy
+        self.conversation_tool = ConversationRecallTool(dm)  # In ToolManager
+        self.skill_evaluator_tool = SkillEvaluator(dm)  # TODO: Migrate
+        self.user_preference_tool = UserPreferenceTool(dm)  # TODO: Migrate
+        self.clarify_tool = ClarifyCommunicationTool()  # TODO: Migrate
+        self.life_event_tool = LifeEventTool(dm) if 'dm' in globals() else None  # TODO: Migrate
+        self.format_tool = FormatTool()  # TODO: Migrate
+        
+        # Combine managed tools + legacy tools
+        legacy_tools = [
+            self.skill_evaluator_tool,
+            self.user_preference_tool,
+            self.clarify_tool,
+            self.format_tool
+        ]
+        if self.life_event_tool:
+            legacy_tools.append(self.life_event_tool)
+        
+        # Final tool list (managed + legacy)
+        tool_list = managed_tools + legacy_tools
+        
+        # Create mapping for backward compatibility
+        self.tool_instances = {tool.name: tool for tool in tool_list}
+        
+        print(f"🔧 Total tools available: {len(tool_list)}")
+        print(f"   Tool names: {list(self.tool_instances.keys())}")
+        
+        # ===================================================================
+        # Bind tools to LLM
+        # ===================================================================
+        
+        # Initialize response handler for empty responses
+        self.response_handler = GeminiResponseHandler()
+        
+        try:
+            # Bind all tools to LLM (works for all providers now!)
             self.llm_with_tools = llm.bind_tools(tool_list)
+            print(f"✅ Successfully bound {len(tool_list)} tools to {provider} LLM")
+        except Exception as e:
+            print(f"⚠️  Tool binding failed: {e}")
+            print(f"   Using LLM without tools")
+            self.llm_with_tools = llm
 
     def get_conversation_history(self) -> List[Dict[str, Any]]:
         """Retrieve the conversation history for this agent."""
@@ -1785,29 +1827,17 @@ When user asks about:
                 # Return the AIMessage with tool_calls - graph will route to tools node
                 return {"messages": [response]}
             
-            # Check if Gemini returned an empty response (common issue)
-            response_content = response.content if hasattr(response, 'content') else str(response)
-            if not response_content or response_content.strip() in ['', '```', '\n```', '`']:
-                print("⚠️  DETECTED EMPTY RESPONSE - Generating fallback")
+            # ===================================================================
+            # 🚀 Universal Empty Response Handling (works for ALL providers)
+            # ===================================================================
+            
+            # Check for empty responses (can happen with any LLM, not just Gemini)
+            if self.response_handler.is_empty_response(response):
+                print("⚠️  DETECTED EMPTY RESPONSE - Using response handler")
                 
-                # Check if we have tool results in recent messages that weren't used
-                for msg in reversed(messages[-3:]):
-                    if hasattr(msg, 'type') and msg.type == 'tool':
-                        tool_result = msg.content
-                        print(f"✅ Found unused tool result, creating response from it")
-                        
-                        # Generate a helpful response based on the tool result
-                        from langchain_core.messages import AIMessage
-                        fallback_response = AIMessage(
-                            content=f"Based on the information I found: {tool_result[:500]}..."
-                        )
-                        return {"messages": [fallback_response]}
-                
-                # No tool results found, ask user to try again
-                print("⚠️  No tool results found, asking user to try again")
-                from langchain_core.messages import AIMessage
-                fallback_response = AIMessage(
-                    content="I apologize, but I'm having trouble generating a response. Could you please rephrase your question or try asking something else?"
+                # Use response handler to create fallback
+                fallback_response = self.response_handler.create_response_with_fallback(
+                    response, messages
                 )
                 return {"messages": [fallback_response]}
             
