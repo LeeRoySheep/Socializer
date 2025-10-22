@@ -1938,9 +1938,17 @@ When user asks about:
         # Initialize a new graph
         graph_builder = StateGraph(State)
         
+        # ✅ FIX: Create tool_node with instance tools (includes new SearchTool!)
+        # Don't use the global tool_node which has old tools
+        instance_tool_list = list(self.tool_instances.values())
+        instance_tool_node = BasicToolNode(tools=instance_tool_list)
+        
+        print(f"🔧 Building graph with {len(instance_tool_list)} tools:")
+        print(f"   {list(self.tool_instances.keys())}")
+        
         # Add nodes
         graph_builder.add_node("chatbot", self.chatbot)
-        graph_builder.add_node("tools", tool_node)
+        graph_builder.add_node("tools", instance_tool_node)
         
         # Define the conditional routing
         graph_builder.add_conditional_edges(
