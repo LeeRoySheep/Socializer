@@ -60,6 +60,10 @@ class User(Base):
     member_since: Mapped[datetime.date] = mapped_column(Date, default=datetime.date.today)
     messages: Mapped[int] = mapped_column(Integer, default=0)  # Track number of messages sent
     
+    # Memory and encryption fields
+    encryption_key: Mapped[str] = mapped_column(String, nullable=True)  # User-specific encryption key
+    conversation_memory: Mapped[str] = mapped_column(Text, nullable=True)  # Encrypted conversation memory
+    
     # Relationships
     user_skills: Mapped[list["UserSkill"]] = relationship(
         "UserSkill", 

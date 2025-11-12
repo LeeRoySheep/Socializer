@@ -259,44 +259,84 @@ class ConversationRecallTool(BaseTool):
             # Retrieve user from database
             user = self.dm.get_user(user_id)
             
-            # Handle user not found or no messages
-            if not user or not user.messages or user.messages == "[]":
+            if not user:
+                return json.dumps({
+                    "status": "error",
+                    "message": f"User {user_id} not found"
+                })
+            
+            # Try to get from encrypted memory first
+            try:
+                from memory.secure_memory_manager import SecureMemoryManager
+                
+                # Create memory manager for this user
+                memory_manager = SecureMemoryManager(self.dm, user)
+                
+                # Recall from encrypted memory
+                memory_data = memory_manager.recall_conversation_memory()
+                
+                if memory_data and memory_data.get("messages"):
+                    # Get messages from memory
+                    all_messages = memory_data.get("messages", [])
+                    general_chat = memory_data.get("general_chat", [])
+                    ai_conversation = memory_data.get("ai_conversation", [])
+                    
+                    # Return last 10 messages
+                    last_messages = all_messages[-10:] if len(all_messages) > 10 else all_messages
+                    
+                    # Count message types
+                    ai_count = sum(1 for msg in last_messages 
+                                  if isinstance(msg, dict) and msg.get('type') == 'ai')
+                    chat_count = sum(1 for msg in last_messages 
+                                   if isinstance(msg, dict) and msg.get('type') in ['chat', 'general'])
+                    
+                    return json.dumps({
+                        "status": "success",
+                        "message": "Conversation retrieved from encrypted memory",
+                        "data": last_messages,
+                        "general_chat": general_chat[-10:],
+                        "ai_conversation": ai_conversation[-10:],
+                        "total_messages": len(all_messages),
+                        "returned_messages": len(last_messages),
+                        "ai_messages": ai_count,
+                        "chat_messages": chat_count
+                    })
+                    
+            except ImportError:
+                # Fallback to old system if memory module not available
+                pass
+            except Exception as e:
+                print(f"Memory system error, falling back: {e}")
+            
+            # Fallback to old messages field if memory not available
+            if not user.messages or user.messages == "[]":
                 return json.dumps({
                     "status": "success",
                     "message": "No previous conversation found",
                     "data": [],
                 })
 
-            # Parse the messages if they're stored as a JSON string
+            # Parse the old messages field
             try:
                 if isinstance(user.messages, str):
                     messages = json.loads(user.messages)
                 else:
                     messages = user.messages
 
-                # Ensure messages is a list
                 if not isinstance(messages, list):
                     messages = []
 
-                # Return the last 10 messages to include both AI and chat history
                 last_messages = messages[-10:] if len(messages) > 10 else messages
-                
-                # Count message types for context
-                ai_count = sum(1 for msg in last_messages if isinstance(msg, dict) and msg.get('type') == 'ai')
-                chat_count = sum(1 for msg in last_messages if isinstance(msg, dict) and msg.get('type') == 'chat')
                 
                 return json.dumps({
                     "status": "success",
-                    "message": "Conversation retrieved successfully",
+                    "message": "Conversation retrieved (legacy)",
                     "data": last_messages,
                     "total_messages": len(messages),
-                    "returned_messages": len(last_messages),
-                    "ai_messages": ai_count,
-                    "chat_messages": chat_count
+                    "returned_messages": len(last_messages)
                 })
 
             except json.JSONDecodeError as e:
-                # Handle corrupted message data
                 return json.dumps({
                     "status": "error",
                     "message": f"Failed to parse conversation: {str(e)}",
@@ -304,7 +344,6 @@ class ConversationRecallTool(BaseTool):
                 })
 
         except Exception as e:
-            # Handle any other errors (database, etc.)
             return json.dumps({
                 "status": "error",
                 "message": f"Failed to retrieve conversation: {str(e)}",

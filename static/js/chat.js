@@ -912,6 +912,54 @@ function handleIncomingMessage(event) {
             updateOnlineUsersList(message.users || []);
             break;
             
+        case 'chat_history':
+            // Display historical messages when joining
+            console.log('[CHAT HISTORY] Received chat history:', message);
+            console.log('[CHAT HISTORY] Number of messages:', message.messages ? message.messages.length : 0);
+            
+            if (message.messages && Array.isArray(message.messages) && message.messages.length > 0) {
+                console.log('[CHAT HISTORY] Processing', message.messages.length, 'historical messages');
+                // Display a separator for history
+                const historyMarker = document.createElement('div');
+                historyMarker.className = 'message system-message';
+                historyMarker.innerHTML = `
+                    <div class="message-content">
+                        <i class="bi bi-clock-history"></i>
+                        Previous messages (last 10)
+                    </div>
+                `;
+                elements.chatMessages.appendChild(historyMarker);
+                
+                // Display each historical message
+                message.messages.forEach(msg => {
+                    displayMessage({
+                        sender: {
+                            id: msg.user_id,
+                            username: msg.username
+                        },
+                        content: msg.content,
+                        timestamp: msg.timestamp,
+                        messageType: 'chat_message',
+                        isHistory: true  // Mark as historical
+                    });
+                });
+                
+                // Add end of history marker
+                const endMarker = document.createElement('div');
+                endMarker.className = 'message system-message';
+                endMarker.innerHTML = `
+                    <div class="message-content">
+                        <i class="bi bi-arrow-down-circle"></i>
+                        New messages below
+                    </div>
+                `;
+                elements.chatMessages.appendChild(endMarker);
+                
+                // Scroll to bottom
+                elements.chatMessages.scrollTop = elements.chatMessages.scrollHeight;
+            }
+            break;
+            
         case 'chat_message':
             displayMessage({
                 sender: {
@@ -1240,11 +1288,11 @@ function updateConnectionStatus(connected, message = '') {
     elements.connectionStatus.className = connected ? 'connected' : 'disconnected';
 }
 
-function displayMessage({ sender, content, messageType = 'chat_message', timestamp }) {
+function displayMessage({ sender, content, messageType = 'chat_message', timestamp, isHistory = false }) {
     if (!elements.chatMessages) return;
     
     const messageElement = document.createElement('div');
-    messageElement.className = `message ${messageType}`;
+    messageElement.className = `message ${messageType}${isHistory ? ' history-message' : ''}`;
     
     const timeString = formatTime(timestamp);
     messageElement.innerHTML = `
@@ -1253,6 +1301,7 @@ function displayMessage({ sender, content, messageType = 'chat_message', timesta
                 ${escapeHtml(sender.username || sender)}
             </span>
             <span class="time">${timeString}</span>
+            ${isHistory ? '<span class="history-badge">history</span>' : ''}
         </div>
         <div class="message-content">${content}</div>
     `;

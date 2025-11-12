@@ -30,6 +30,79 @@ class DataManager:
         finally:
             session.close()
     
+    # Memory Management Methods
+    
+    def get_user_memory(self, user_id: int) -> Optional[str]:
+        """
+        Get encrypted conversation memory for a user.
+        
+        Args:
+            user_id: The ID of the user
+            
+        Returns:
+            str: Encrypted memory string or None if not found
+        """
+        with self.get_session() as session:
+            try:
+                user = session.query(User).filter(User.id == user_id).first()
+                if user:
+                    return user.conversation_memory
+                return None
+            except Exception as e:
+                print(f"Error getting user memory: {e}")
+                return None
+    
+    def update_user_memory(self, user_id: int, encrypted_memory: str) -> bool:
+        """
+        Update encrypted conversation memory for a user.
+        
+        Args:
+            user_id: The ID of the user
+            encrypted_memory: Encrypted memory string to store
+            
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        with self.get_session() as session:
+            try:
+                user = session.query(User).filter(User.id == user_id).first()
+                if user:
+                    user.conversation_memory = encrypted_memory
+                    session.commit()
+                    return True
+                return False
+            except Exception as e:
+                session.rollback()
+                print(f"Error updating user memory: {e}")
+                return False
+    
+    def ensure_user_encryption_key(self, user_id: int) -> str:
+        """
+        Ensure user has an encryption key, generate if needed.
+        
+        Args:
+            user_id: The ID of the user
+            
+        Returns:
+            str: The user's encryption key
+        """
+        from cryptography.fernet import Fernet
+        
+        with self.get_session() as session:
+            try:
+                user = session.query(User).filter(User.id == user_id).first()
+                if user:
+                    if not user.encryption_key:
+                        # Generate new key
+                        user.encryption_key = Fernet.generate_key().decode()
+                        session.commit()
+                    return user.encryption_key
+                return None
+            except Exception as e:
+                session.rollback()
+                print(f"Error ensuring encryption key: {e}")
+                return None
+    
     # User Preference Methods
     
     def get_user_preferences(self, user_id: int, preference_type: str = None) -> dict:

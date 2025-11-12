@@ -268,6 +268,48 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 static_dir = os.path.join(BASE_DIR, 'static')
 app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
+# Initialize general chat history on startup
+@app.on_event("startup")
+async def startup_event():
+    """Initialize services on startup."""
+    from app.websocket.general_chat_history import get_general_chat_history
+    from datetime import datetime, timedelta
+    
+    # Initialize chat history with welcome messages
+    history = get_general_chat_history()
+    
+    if len(history) == 0:
+        logger.info("[STARTUP] Initializing general chat history with welcome messages")
+        
+        base_time = datetime.utcnow() - timedelta(minutes=30)
+        
+        # Add some initial user messages (no system/AI messages)
+        initial_messages = [
+            ("Alice", "Good morning everyone! 👋", "user_1"),
+            ("Bob", "Hey Alice! How's it going?", "user_2"),
+            ("Alice", "Great! Just started working on my project", "user_1"),
+            ("Charlie", "Morning folks! What project are you working on Alice?", "user_3"),
+            ("Alice", "Building a web app with FastAPI", "user_1"),
+            ("Bob", "Nice! I'm using FastAPI too, it's awesome", "user_2"),
+            ("Charlie", "The async support is really good", "user_3"),
+            ("David", "Hey everyone! Just joined 😊", "user_4"),
+            ("Alice", "Welcome David!", "user_1"),
+            ("Bob", "Hi David! We're talking about FastAPI", "user_2"),
+        ]
+        
+        for i, (username, content, user_id) in enumerate(initial_messages):
+            msg_time = base_time + timedelta(minutes=i*5)
+            history.add_message({
+                "username": username,
+                "content": content,
+                "user_id": user_id,
+                "timestamp": msg_time.isoformat()
+            })
+        
+        logger.info(f"[STARTUP] Chat history initialized with {len(history)} messages")
+    else:
+        logger.info(f"[STARTUP] Chat history already has {len(history)} messages")
+
 # Templates with absolute path
 templates_dir = os.path.join(BASE_DIR, 'templates')
 templates = Jinja2Templates(directory=templates_dir)
@@ -782,6 +824,7 @@ async def websocket_endpoint(
     """
     from app.websocket.chat_manager import manager as chat_manager
     from app.websocket.chat_endpoint import get_current_user_websocket
+    from app.websocket.general_chat_history import get_general_chat_history
     from sqlalchemy.orm import Session
     from app.database import SessionLocal
     
@@ -858,6 +901,26 @@ async def websocket_endpoint(
             "username": user_info['username']
         }, client_id)
         
+        # Send general chat history to the new user
+        if room_id == "general":
+            chat_history = get_general_chat_history()
+            history_messages = chat_history.get_history()
+            
+            logger.info(f"[CHAT HISTORY] Room: {room_id}, History size: {len(history_messages)}")
+            
+            if history_messages:
+                # Send history as a special message type
+                history_payload = {
+                    "type": "chat_history",
+                    "messages": history_messages,
+                    "room_id": room_id,
+                    "timestamp": datetime.utcnow().isoformat()
+                }
+                logger.info(f"[CHAT HISTORY] Sending {len(history_messages)} messages to user {user.id}")
+                await chat_manager.send_personal_message(history_payload, client_id)
+                logger.info(f"[CHAT HISTORY] Sent successfully to client {client_id}")
+            else:
+                logger.info(f"[CHAT HISTORY] No history messages to send (history is empty)")
         # Note: join_room() already broadcasts user_joined message, no need to duplicate
         
         # Main message loop
@@ -894,6 +957,7 @@ async def websocket_endpoint(
                         if numeric_room_id:
                             # Save to database using DataManager
                             from datamanager.data_manager import DataManager
+                            from memory.secure_memory_manager import SecureMemoryManager
                             dm = DataManager("data.sqlite.db")
                             saved_msg = dm.add_room_message(
                                 room_id=numeric_room_id,
@@ -905,19 +969,54 @@ async def websocket_endpoint(
                                 logger.info(f"Saved message to database: room_id={numeric_room_id}, user_id={user.id}, msg_id={saved_msg.id}")
                             else:
                                 logger.warning(f"Message save returned None: room_id={numeric_room_id}")
+                    
+                        # Also save to encrypted memory
+                        try:
+                            memory_manager = SecureMemoryManager(dm, user)
+                            memory_manager.add_message({
+                                "type": "general",
+                                "sender": user.username,
+                                "content": content,
+                                "room_id": room_id,
+                                "timestamp": datetime.utcnow().isoformat()
+                            }, message_type="general")
+                            # Auto-save periodically
+                            if len(memory_manager._current_memory.get("messages", [])) % 5 == 0:
+                                memory_manager.save_combined_memory(
+                                    memory_manager._current_memory.get("messages", []),
+                                    max_general=10,
+                                    max_ai=20
+                                )
+                        except Exception as mem_e:
+                            logger.debug(f"Memory save error: {mem_e}")
+
                     except Exception as e:
                         logger.error(f"Failed to save message to database: {e}")
                         # Continue anyway - message still gets broadcast
                         
-                    # Broadcast chat message to room
-                    await chat_manager.broadcast({
+                    # Create the message
+                    chat_message = {
                         "type": "chat_message",
                         "user_id": str(user.id),
                         "username": user_info['username'],
                         "room_id": room_id,
                         "content": content,
                         "timestamp": datetime.utcnow().isoformat()
-                    }, room_id)
+                    }
+                    
+                    # Add to general chat history if it's the general room
+                    if room_id == "general":
+                        chat_history = get_general_chat_history()
+                        chat_history.add_message({
+                            "username": user_info['username'],
+                            "content": content,
+                            "timestamp": chat_message['timestamp'],
+                            "user_id": str(user.id)
+                        })
+                        logger.debug(f"Added message to general chat history, now {len(chat_history)} messages")
+                    
+                    # Broadcast chat message to room
+                    await chat_manager.broadcast(chat_message, room_id)
                     
                 elif message_type == "typing":
                     # Broadcast typing indicator to room (except sender)

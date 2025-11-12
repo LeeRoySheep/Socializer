@@ -429,6 +429,7 @@ async def handle_client_message(
             # Save the user's chat message to their conversation history
             try:
                 from datamanager.data_manager import DataManager
+                from memory.secure_memory_manager import SecureMemoryManager
                 from app.config import SQLALCHEMY_DATABASE_URL
                 
                 db_path = SQLALCHEMY_DATABASE_URL.replace('sqlite:///', '')
@@ -446,6 +447,31 @@ async def handle_client_message(
                 ])
             except Exception as save_error:
                 logger.error(f"Error saving chat message for user {user_id}: {save_error}")
+                
+                # Also save to encrypted memory for recall
+                try:
+                    user_obj = dm.get_user(int(user_id))
+                    if user_obj:
+                        memory_manager = SecureMemoryManager(dm, user_obj)
+                        memory_manager.add_message({
+                            "type": "general",
+                            "sender": username,
+                            "content": text,
+                            "room_id": room_id,
+                            "timestamp": datetime.utcnow().isoformat()
+                        }, message_type="general")
+                        # Auto-save every few messages
+                        if len(memory_manager._current_memory.get("general_chat", [])) >= 3:
+                            memory_manager.save_combined_memory(
+                                memory_manager._current_memory.get("messages", []),
+                                max_general=10,  # Keep last 10 general chat
+                                max_ai=20        # Keep last 20 AI messages
+                            )
+                            logger.debug(f"Saved general chat to encrypted memory for user {user_id}")
+                except Exception as mem_error:
+                    logger.error(f"Error saving to memory: {mem_error}")
+                    # Don't fail the chat if memory save fails
+
                 # Don't fail the chat if saving fails
                 
             # Broadcast the message to all connected clients in the room

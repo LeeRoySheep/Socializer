@@ -36,6 +36,10 @@ from app.config import SQLALCHEMY_DATABASE_URL
 from app.ote_logger import get_logger, create_metrics
 import time
 
+# Memory system imports
+from memory.user_agent import UserAgent
+from memory.secure_memory_manager import SecureMemoryManager
+
 # Initialize the database manager
 db_path = SQLALCHEMY_DATABASE_URL.replace('sqlite:///', '')
 dm = DataManager(db_path)
@@ -1112,6 +1116,16 @@ class AiChatagent:
         self.used_tools_in_session = set()  # Track tools used in current session
         self.last_user_message = None  # Track the last user message to detect new conversations
         
+        # Initialize memory system
+        self.memory_agent = UserAgent(
+            user=self.user,
+            llm=self.llm,
+            data_manager=dm
+        )
+        # Load existing memory context
+        self.memory_agent._load_context()
+        print(f"🧠 Memory system initialized for user: {user.username}")
+        
         # Initialize tool instances
         self.tavily_search = TavilySearchTool(search_tool=tool_1)
         self.conversation_tool = ConversationRecallTool(dm)
@@ -1302,8 +1316,10 @@ class AiChatagent:
                                 continue
                             
                             print(f"⚠️  Detected tool loop: {tool_name} called {count} times with same args, breaking...")
-                            return {"messages": [{"role": "assistant", 
+                            result = {"messages": [{"role": "assistant", 
                                               "content": f"I've already searched for that information. Based on the results I found, let me provide you with the answer."}]}
+                            self._save_to_memory(state, result)
+                            return result
             
             # If last message is an AIMessage with tool_calls, check if already executed
             if hasattr(last_message, 'tool_calls') and last_message.tool_calls:
@@ -1364,8 +1380,10 @@ class AiChatagent:
                         print(f"   🛑 BLOCKING duplicate call")
                         print(f"   ✅ Will use previous results instead")
                         print("="*70 + "\n")
-                        return {"messages": [{"role": "assistant", 
+                        result = {"messages": [{"role": "assistant", 
                                           "content": f"I've already searched for that information. Based on the results I found earlier, let me provide you with the answer."}]}
+                        self._save_to_memory(state, result)
+                        return result
                 
                 print(f"\n   ✅ NO DUPLICATES FOUND - This is a NEW tool call")
                 print(f"\n" + "="*70)
@@ -1717,7 +1735,9 @@ When user asks about:
                         stop_message = AIMessage(
                             content="I've already searched for this information. Based on the search results above, I can answer your question. Please let me know if you need any clarification or have a different question."
                         )
-                        return {"messages": [stop_message]}
+                        result = {"messages": [stop_message]}
+                        self._save_to_memory(state, result)
+                        return result
                 
                 # Check each requested tool call
                 for tool_call in response.tool_calls:
@@ -1828,10 +1848,14 @@ When user asks about:
                 fallback_response = self.response_handler.create_response_with_fallback(
                     response, messages
                 )
-                return {"messages": [fallback_response]}
+                result = {"messages": [fallback_response]}
+                self._save_to_memory(state, result)
+                return result
             
-            # Regular response (no tool calls) - return it
-            return {"messages": [response]}
+            # Regular response (no tool calls) - save to memory and return it
+            result = {"messages": [response]}
+            self._save_to_memory(state, result)
+            return result
                 
         except Exception as e:
             error_msg = str(e)
@@ -1885,6 +1909,65 @@ When user asks about:
             traceback.print_exc()
             return END
 
+    def _save_to_memory(self, state: Dict, response: Dict) -> None:
+        """
+        Save conversation to encrypted memory.
+        
+        Args:
+            state: Current conversation state
+            response: Response being returned
+        """
+        try:
+            messages = state.get("messages", [])
+            
+            # Find and save the last user message
+            for msg in reversed(messages):
+                if hasattr(msg, 'type') and msg.type == 'human':
+                    self.memory_agent.add_to_memory({
+                        "role": "user",
+                        "content": getattr(msg, 'content', ''),
+                        "type": "ai"
+                    })
+                    break
+                elif isinstance(msg, dict) and msg.get('role') == 'user':
+                    self.memory_agent.add_to_memory({
+                        "role": "user",
+                        "content": msg.get('content', ''),
+                        "type": "ai"
+                    })
+                    break
+                elif hasattr(msg, '__class__') and msg.__class__.__name__ == 'HumanMessage':
+                    self.memory_agent.add_to_memory({
+                        "role": "user",
+                        "content": msg.content,
+                        "type": "ai"
+                    })
+                    break
+            
+            # Save AI response if present
+            if response and 'messages' in response:
+                for msg in response['messages']:
+                    if isinstance(msg, dict) and 'content' in msg:
+                        self.memory_agent.add_to_memory({
+                            "role": msg.get('role', 'assistant'),
+                            "content": msg.get('content', ''),
+                            "type": "ai"
+                        })
+                    elif hasattr(msg, 'content') and not hasattr(msg, 'tool_calls'):
+                        self.memory_agent.add_to_memory({
+                            "role": "assistant",
+                            "content": getattr(msg, 'content', ''),
+                            "type": "ai"
+                        })
+            
+            # Auto-save every 3 messages
+            if len(self.memory_agent._conversation_buffer) >= 3:
+                self.memory_agent.save_memory()
+                print("💾 Conversation saved to encrypted memory")
+                
+        except Exception as e:
+            print(f"⚠️ Error saving to memory: {e}")
+    
     def _find_previous_tool_result(self, messages: list, tool_name: str, tool_args: dict) -> Optional[str]:
         """
         OOP Helper: Find previous tool result from conversation history.
