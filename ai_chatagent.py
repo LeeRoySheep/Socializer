@@ -22,6 +22,7 @@ from tools.conversation_recall_tool import ConversationRecallTool
 from tools.gemini.search_tool import SearchTool  # New Gemini-compatible SearchTool
 from tools.gemini import GeminiResponseHandler  # Response handler for empty responses
 from tools.tool_manager import ToolManager  # Universal tool manager for all LLM providers
+from services.language_detector import get_language_detector, LanguageConfidence  # Language auto-detection
 
 # Add the project root to the Python path
 project_root = str(Path(__file__).resolve().parent.parent)
@@ -1106,12 +1107,28 @@ class AiChatagent:
         self.current_request_id = None
         self.skills = dm.get_skills_for_user(user.id) or {}
         self.training = dm.get_training_for_user(user.id) or {}
+        
+        # ✅ Load user's preferred language from database
+        user_prefs = dm.get_user_preferences(user.id, preference_type="communication")
+        self.user_language = user_prefs.get("communication.preferred_language", None)
+        self.language_confirmed = self.user_language is not None
+        
+        # Initialize language detector
+        self.language_detector = get_language_detector()
+        
+        if self.user_language:
+            print(f"🌐 User language preference: {self.user_language} (saved)")
+        else:
+            self.user_language = "English"  # Default
+            print(f"🌐 No language preference saved, will auto-detect from messages")
+        
         self.user_profile = {
             "username": user.username,
             "skills": self.skills,
             "training": self.training,
             "preferences": self.preferences,
             "temperature": self.temperature,
+            "language": self.user_language,
         }
         self.used_tools_in_session = set()  # Track tools used in current session
         self.last_user_message = None  # Track the last user message to detect new conversations
@@ -1275,6 +1292,30 @@ class AiChatagent:
             last_message = messages[-1]
             print(f"Last message type: {type(last_message).__name__}")
             
+            # ✅ AUTO-DETECT LANGUAGE (if not yet confirmed)
+            if not self.language_confirmed and hasattr(last_message, 'type') and last_message.type == 'human':
+                user_text = getattr(last_message, 'content', '')
+                if user_text and len(user_text) > 5:  # Meaningful text
+                    result = self.language_detector.detect(user_text)
+                    print(f"🔍 Language detection: {result.language} (confidence: {result.confidence.value})")
+                    
+                    if self.language_detector.should_auto_save(result):
+                        # High confidence - auto-save
+                        success = dm.set_user_preference(
+                            user_id=self.user.id,
+                            preference_type="communication",
+                            preference_key="preferred_language",
+                            preference_value=result.language,
+                            confidence=result.confidence_score
+                        )
+                        if success:
+                            self.user_language = result.language
+                            self.language_confirmed = True
+                            print(f"✅ Auto-saved language preference: {result.language}")
+                    elif result.should_ask_user:
+                        # Lower confidence - we'll ask in the response
+                        print(f"⚠️  Will ask user to confirm language: {result.language}")
+            
             # ✅ ENHANCED: Check for tool call loops (same tool called 2+ times)
             # BUT ONLY within the CURRENT user question (not across different questions)
             if len(messages) >= 3:
@@ -1420,7 +1461,21 @@ class AiChatagent:
                 print(f"❌ Could not load historical messages: {e}")
             
             # Enhanced system message with social behavior training and translation
+            language_status = "confirmed" if self.language_confirmed else "auto-detected (not yet confirmed)"
             system_prompt = f"""You are an AI Social Coach and Communication Assistant for user ID: {self.user.id} (Username: {self.user.username})
+
+🌐 **USER'S PREFERRED LANGUAGE: {self.user_language}** (Status: {language_status})
+⚠️ CRITICAL: You MUST ALWAYS respond in {self.user_language}.
+- All your responses should be written entirely in {self.user_language}
+- Adapt your tone and cultural context to {self.user_language} speakers
+- When monitoring conversations, provide interventions in {self.user_language}
+
+🔍 **LANGUAGE CONFIRMATION (for new users):**
+- If language is NOT YET CONFIRMED and you detect the user is speaking a different language:
+  * Acknowledge their message in the detected language
+  * Politely ask: "I detected you might prefer [Language]. Should I continue in [Language]?"
+  * If user confirms, the system will automatically save their preference
+- Language detection happens automatically - just confirm with the user when uncertain
 
 ⚠️ **CRITICAL: ALWAYS PROVIDE A RESPONSE**
 After receiving tool results, you MUST respond with helpful, informative content.

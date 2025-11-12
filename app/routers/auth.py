@@ -4,6 +4,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordRequestForm
+from cryptography.fernet import Fernet
 from sqlalchemy.orm import Session
 
 from .. import models, schemas
@@ -60,10 +61,15 @@ async def register_user(
     
     # Create new user
     hashed_password = get_password_hash(user_data.password)
+    
+    # ✅ Generate encryption key for secure memory
+    encryption_key = Fernet.generate_key().decode()
+    
     db_user = models.User(
         username=user_data.username,
         email=user_data.email,
         hashed_password=hashed_password,
+        encryption_key=encryption_key,
         is_active=True
     )
     

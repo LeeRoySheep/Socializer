@@ -23,6 +23,7 @@ from fastapi.websockets import WebSocketState
 from .models import User
 from jose import JWTError, jwt, exceptions as jose_exceptions
 from passlib.context import CryptContext
+from cryptography.fernet import Fernet
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 from starlette.exceptions import HTTPException as StarletteHTTPException
@@ -1537,16 +1538,22 @@ async def register_user(
         # Hash the password
         hashed_password = pwd_context.hash(password)
         
-        # Create new user
+        # ✅ Generate encryption key for secure memory
+        encryption_key = Fernet.generate_key().decode()
+        
+        # Create new user with encryption key
         db_user = User(
             username=username,
             hashed_email=email,
-            hashed_password=hashed_password
+            hashed_password=hashed_password,
+            encryption_key=encryption_key
         )
         
         db.add(db_user)
         db.commit()
         db.refresh(db_user)
+        
+        logger.info(f"✅ New user created: {username} (ID: {db_user.id}) with encryption key")
         
         # Return success response based on content type
         if is_json:
