@@ -162,7 +162,7 @@ class OTELogger:
             **metadata: Additional context
         """
         total_tokens = prompt_tokens + completion_tokens
-        cost = self._calculate_cost(prompt_tokens, completion_tokens)
+        cost = self._calculate_cost(model, prompt_tokens, completion_tokens)
         
         self.logger.info(
             f"🤖 LLM CALL | {model} | "
@@ -316,10 +316,43 @@ class OTELogger:
             "duplicate_blocks": sum(m.duplicate_blocks for m in recent),
         }
     
-    def _calculate_cost(self, prompt_tokens: int, completion_tokens: int) -> float:
-        """Calculate estimated cost for token usage."""
-        prompt_cost = (prompt_tokens / 1000) * self.cost_per_1k_prompt
-        completion_cost = (completion_tokens / 1000) * self.cost_per_1k_completion
+    def _calculate_cost(self, model: str, prompt_tokens: int, completion_tokens: int) -> float:
+        """
+        Calculate estimated cost for token usage based on model.
+        
+        Args:
+            model: Model name (e.g., 'gpt-4o-mini', 'gemini-2.0-flash-exp')
+            prompt_tokens: Number of input tokens
+            completion_tokens: Number of output tokens
+            
+        Returns:
+            float: Estimated cost in USD
+        """
+        # Model-specific pricing (per 1k tokens)
+        pricing = {
+            # OpenAI models
+            'gpt-4o': {'prompt': 0.0025, 'completion': 0.010},
+            'gpt-4o-mini': {'prompt': 0.00015, 'completion': 0.0006},
+            'gpt-4-turbo': {'prompt': 0.010, 'completion': 0.030},
+            'gpt-3.5-turbo': {'prompt': 0.0005, 'completion': 0.0015},
+            
+            # Gemini models (free tier = $0)
+            'gemini-2.0-flash-exp': {'prompt': 0.0, 'completion': 0.0},
+            'gemini-1.5-pro': {'prompt': 0.00125, 'completion': 0.005},
+            'gemini-1.5-flash': {'prompt': 0.000075, 'completion': 0.0003},
+            
+            # Claude models
+            'claude-3-5-sonnet-20241022': {'prompt': 0.003, 'completion': 0.015},
+            'claude-3-opus-20240229': {'prompt': 0.015, 'completion': 0.075},
+            'claude-3-sonnet-20240229': {'prompt': 0.003, 'completion': 0.015},
+        }
+        
+        # Get pricing for model (default to gpt-4o-mini if unknown)
+        model_pricing = pricing.get(model, pricing['gpt-4o-mini'])
+        
+        prompt_cost = (prompt_tokens / 1000) * model_pricing['prompt']
+        completion_cost = (completion_tokens / 1000) * model_pricing['completion']
+        
         return prompt_cost + completion_cost
     
     def _get_top_tools(self, metrics: List[AIMetrics], top_n: int = 5) -> List[Dict[str, Any]]:

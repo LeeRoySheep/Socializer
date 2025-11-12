@@ -1678,9 +1678,13 @@ When user asks about:
             # ✅ O-T-E: Log LLM call metrics
             if hasattr(response, 'usage_metadata'):
                 usage = response.usage_metadata
+                
+                # Extract model name from different LLM providers
+                model_name = self._extract_model_name(response)
+                
                 self.ote_logger.log_llm_call(
                     request_id=self.current_request_id,
-                    model=getattr(response, 'model', 'gpt-4o-mini'),
+                    model=model_name,
                     prompt_tokens=usage.get('input_tokens', 0),
                     completion_tokens=usage.get('output_tokens', 0),
                     duration_ms=llm_duration
@@ -2003,6 +2007,48 @@ When user asks about:
         except Exception as e:
             print(f"⚠️ Error finding previous tool result: {e}")
             return None
+    
+    def _extract_model_name(self, response) -> str:
+        """
+        Extract model name from LLM response across different providers.
+        
+        Different LLM providers return model information in different formats:
+        - OpenAI: response.response_metadata['model_name']
+        - Gemini: response.response_metadata['model_name']
+        - Claude: response.response_metadata.get('model')
+        
+        Args:
+            response: LLM response object
+            
+        Returns:
+            str: Model name (e.g., 'gpt-4o-mini', 'gemini-2.0-flash-exp')
+        """
+        # Try response_metadata first (most common)
+        if hasattr(response, 'response_metadata'):
+            metadata = response.response_metadata
+            
+            # Both OpenAI and Gemini use 'model_name'
+            if 'model_name' in metadata:
+                return metadata['model_name']
+            
+            # Claude uses 'model'
+            if 'model' in metadata:
+                return metadata['model']
+        
+        # Try direct model attribute (some providers)
+        if hasattr(response, 'model') and response.model:
+            return response.model
+        
+        # Try id field (some providers)
+        if hasattr(response, 'id') and isinstance(response.id, str):
+            # Extract model from run ID like "run-xxx-model_name-xxx"
+            parts = response.id.split('-')
+            for part in parts:
+                if 'gpt' in part or 'gemini' in part or 'claude' in part:
+                    return part
+        
+        # Fallback to 'unknown' instead of hardcoding a specific model
+        return 'unknown'
     
     def build_graph(self):
         from langgraph.graph import StateGraph

@@ -129,11 +129,35 @@ class SecureMemoryManager:
             bool: True if successful, False otherwise
         """
         try:
-            # Separate message types
+            # SECURITY: Filter out internal system prompts BEFORE saving
+            filtered_messages = []
+            blocked_count = 0
+            
+            for msg in all_messages:
+                content = str(msg.get('content', ''))
+                
+                # Check if this is an internal system prompt
+                if any(phrase in content for phrase in [
+                    'CONVERSATION MONITORING REQUEST',
+                    'INSTRUCTIONS:',
+                    'Should you intervene',
+                    'NO_INTERVENTION_NEEDED',
+                    'You are monitoring this conversation',
+                    'Analyze if intervention is needed'
+                ]):
+                    blocked_count += 1
+                    continue  # Skip this message
+                
+                filtered_messages.append(msg)
+            
+            if blocked_count > 0:
+                print(f"[SECURITY] Blocked {blocked_count} internal system prompts from encrypted memory for user {self._user.id}")
+            
+            # Separate message types from filtered messages
             general_messages = []
             ai_messages = []
             
-            for msg in all_messages:
+            for msg in filtered_messages:
                 msg_type = msg.get("type", "ai")
                 if msg_type == "chat" or msg_type == "general":
                     general_messages.append(msg)
@@ -144,8 +168,8 @@ class SecureMemoryManager:
             self._current_memory["general_chat"] = general_messages[-max_general:] if len(general_messages) > max_general else general_messages
             self._current_memory["ai_conversation"] = ai_messages[-max_ai:] if len(ai_messages) > max_ai else ai_messages
             
-            # Also update combined messages list
-            self._current_memory["messages"] = all_messages[-(max_general + max_ai):]
+            # Also update combined messages list (use filtered messages!)
+            self._current_memory["messages"] = filtered_messages[-(max_general + max_ai):]
             
             # Update metadata
             self._current_memory["metadata"]["last_updated"] = datetime.now().isoformat()
