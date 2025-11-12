@@ -1,0 +1,55 @@
+/* Styles for chat history messages */
+
+/* Historical messages - slightly faded */
+.message.history-message {
+    opacity: 0.8;
+    background: rgba(200, 200, 200, 0.05);
+    border-left: 3px solid #6c757d;
+}
+
+/* History badge */
+.history-badge {
+    background: #6c757d;
+    color: white;
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-size: 0.75rem;
+    margin-left: 10px;
+    font-weight: normal;
+}
+
+/* System messages for history markers */
+.message.system-message {
+    text-align: center;
+    padding: 10px;
+    margin: 15px 0;
+    border: none;
+    background: linear-gradient(90deg, transparent, rgba(108, 117, 125, 0.1), transparent);
+}
+
+.message.system-message .message-content {
+    display: inline-block;
+    padding: 5px 15px;
+    background: rgba(108, 117, 125, 0.1);
+    border-radius: 15px;
+    color: #6c757d;
+    font-size: 0.9rem;
+    font-style: italic;
+}
+
+.message.system-message i {
+    margin-right: 5px;
+}
+
+/* Dark mode support */
+@media (prefers-color-scheme: dark) {
+    .message.history-message {
+        background: rgba(255, 255, 255, 0.03);
+        border-left-color: #495057;
+    }
+    
+    .message.system-message .message-content {
+        background: rgba(255, 255, 255, 0.05);
+        color: #adb5bd;
+    }
+}
