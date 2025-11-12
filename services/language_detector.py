@@ -88,6 +88,18 @@ class LanguageDetector:
     
     # Common words for language identification
     COMMON_WORDS = {
+        'English': ['the', 'be', 'to', 'of', 'and', 'in', 'that', 'have', 'it', 'for',
+                    'not', 'on', 'with', 'he', 'as', 'you', 'do', 'at', 'this', 'but',
+                    'his', 'by', 'from', 'they', 'we', 'say', 'her', 'she', 'or', 'an',
+                    'will', 'my', 'one', 'all', 'would', 'there', 'their', 'what', 'so',
+                    'up', 'out', 'if', 'about', 'who', 'get', 'which', 'go', 'me', 'when',
+                    'make', 'can', 'like', 'time', 'no', 'just', 'him', 'know', 'take',
+                    'people', 'into', 'year', 'your', 'good', 'some', 'could', 'them',
+                    'see', 'other', 'than', 'then', 'now', 'look', 'only', 'come', 'its',
+                    'over', 'think', 'also', 'back', 'after', 'use', 'two', 'how', 'our',
+                    'work', 'first', 'well', 'way', 'even', 'new', 'want', 'because',
+                    'any', 'these', 'give', 'day', 'most', 'us', 'is', 'are', 'was',
+                    'been', 'has', 'had', 'were', 'said', 'did', 'having', 'am'],
         'German': ['der', 'die', 'das', 'und', 'ich', 'ist', 'nicht', 'du', 'sie', 'er', 
                    'wie', 'was', 'wo', 'wann', 'warum', 'aber', 'auch', 'bei', 'mit', 'von',
                    'zu', 'für', 'auf', 'hat', 'haben', 'sein', 'werden', 'können', 'müssen',
@@ -100,8 +112,8 @@ class LanguageDetector:
         'French': ['le', 'la', 'les', 'un', 'une', 'des', 'et', 'ou', 'que', 'de',
                    'dans', 'pour', 'avec', 'sans', 'comme', 'mais', 'si', 'ne', 'pas',
                    'très', 'plus', 'aussi', 'il', 'elle', 'je', 'tu', 'nous', 'vous'],
-        'Italian': ['il', 'lo', 'la', 'i', 'gli', 'le', 'un', 'uno', 'una', 'e',
-                    'o', 'che', 'di', 'a', 'da', 'in', 'per', 'con', 'su',
+        'Italian': ['il', 'lo', 'la', 'gli', 'le', 'un', 'uno', 'una',
+                    'che', 'di', 'da', 'per', 'con', 'su',
                     'come', 'ma', 'se', 'non', 'molto', 'più', 'anche', 'sono', 'è'],
         'Portuguese': ['o', 'a', 'os', 'as', 'um', 'uma', 'e', 'ou', 'que', 'de',
                        'em', 'por', 'para', 'com', 'sem', 'como', 'mas', 'se', 'não',
@@ -118,6 +130,9 @@ class LanguageDetector:
     
     # Greeting patterns
     GREETINGS = {
+        'English': ['hello', 'hi', 'hey', 'good morning', 'good afternoon', 'good evening',
+                    'how are you', 'how do you do', 'nice to meet', 'pleased to meet',
+                    'thanks', 'thank you', 'please', 'goodbye', 'bye', 'see you'],
         'German': ['hallo', 'guten tag', 'guten morgen', 'guten abend', 'wie geht', 'danke', 'bitte'],
         'Spanish': ['hola', 'buenos días', 'buenas tardes', 'buenas noches', 'cómo estás', 'gracias'],
         'French': ['bonjour', 'bonsoir', 'salut', 'comment allez', 'merci', 'sil vous plaît'],
@@ -230,12 +245,40 @@ class LanguageDetector:
         return None
     
     def _detect_by_greetings(self, text_lower: str) -> Optional[LanguageDetectionResult]:
-        """Detect language by common greetings."""
+        """Detect language by common greetings - counts all matches."""
+        # Count greeting matches for each language
+        greeting_counts = {}
+        greeting_positions = {}  # Track position of first greeting
+        
         for language, greetings in self.GREETINGS.items():
+            count = 0
+            first_pos = len(text_lower)  # Default to end
+            
             for greeting in greetings:
                 if greeting in text_lower:
-                    return LanguageDetectionResult(
-                        language=language,
+                    count += 1
+                    pos = text_lower.find(greeting)
+                    if pos < first_pos:
+                        first_pos = pos
+            
+            if count > 0:
+                greeting_counts[language] = count
+                greeting_positions[language] = first_pos
+        
+        if not greeting_counts:
+            return None
+        
+        # If multiple languages have greetings, prefer:
+        # 1. Language with most greeting matches
+        # 2. If tied, language with greeting appearing first
+        best_language = max(
+            greeting_counts.keys(),
+            key=lambda lang: (greeting_counts[lang], -greeting_positions[lang])
+        )
+        
+        if greeting_counts[best_language] > 0:
+            return LanguageDetectionResult(
+                        language=best_language,
                         confidence=LanguageConfidence.HIGH,
                         confidence_score=0.95,
                         alternative_languages=[],

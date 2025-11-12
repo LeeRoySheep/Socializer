@@ -341,7 +341,10 @@ class OTELogger:
             'gemini-1.5-pro': {'prompt': 0.00125, 'completion': 0.005},
             'gemini-1.5-flash': {'prompt': 0.000075, 'completion': 0.0003},
             
-            # Claude models
+            # Claude models (Claude 4.0 naming)
+            'claude-sonnet-4-0': {'prompt': 0.003, 'completion': 0.015},  # Latest
+            'claude-opus-4-0': {'prompt': 0.015, 'completion': 0.075},
+            # Legacy Claude 3.x models
             'claude-3-5-sonnet-20241022': {'prompt': 0.003, 'completion': 0.015},
             'claude-3-opus-20240229': {'prompt': 0.015, 'completion': 0.075},
             'claude-3-sonnet-20240229': {'prompt': 0.003, 'completion': 0.015},

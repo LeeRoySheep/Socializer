@@ -285,7 +285,7 @@ class LLMProviderManager:
         if claude_key:
             self.add_provider(
                 name=ProviderType.CLAUDE.value,
-                model=os.getenv("CLAUDE_MODEL", "claude-3-5-sonnet-20241022"),
+                model=os.getenv("CLAUDE_MODEL", "claude-sonnet-4-0"),  # Updated to Claude 4.0
                 api_key=claude_key,
                 max_requests_per_minute=50,
                 priority=3

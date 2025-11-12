@@ -59,11 +59,12 @@ class LLMSettings:
         "gemini-1.5-flash": "Paid only - Fast and efficient",
     }
     
-    # Claude Models
+    # Claude Models (Updated to Claude 4.0 naming)
     CLAUDE_OPTIONS = {
-        "claude-3-5-sonnet-20241022": "Most capable Claude model",
-        "claude-3-opus-20240229": "Powerful reasoning",
-        "claude-3-sonnet-20240229": "Balanced performance",
+        "claude-sonnet-4-0": "Latest Claude 4.0 (recommended)",
+        "claude-opus-4-0": "Most capable Claude 4.0",
+        "claude-3-opus-20240229": "Powerful reasoning (legacy 3.x)",
+        "claude-3-sonnet-20240229": "Balanced performance (legacy 3.x)",
     }
     
     # Local Models (LM Studio)
@@ -204,7 +205,7 @@ class LLMPresets:
     # Claude (Anthropic)
     CLAUDE_BEST = {
         "provider": "claude",
-        "model": "claude-3-5-sonnet-20241022",
+        "model": "claude-sonnet-4-0",  # Updated to Claude 4.0
         "temperature": 0.7,
         "max_tokens": 8192,
     }

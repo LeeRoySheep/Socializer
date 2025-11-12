@@ -611,37 +611,45 @@ function handlePassiveListening(event) {
 }
 
 function toggleAIAssistant() {
-    // IMPORTANT: AI monitoring is MANDATORY and cannot be disabled
-    // This ensures consistent empathy monitoring and communication quality
-    console.log('[AI] Toggle clicked, but AI is mandatory (always on)');
+    console.log('[AI] Toggle clicked, current state:', isAIActive);
     
-    displaySystemMessage(
-        '🤖 AI monitoring is always active to ensure empathy, cultural sensitivity, and communication quality. This cannot be disabled.',
-        'info-message'
-    );
-    
-    // Ensure it stays on
-    isAIActive = true;
-    isListening = true;
+    // Toggle the state
+    isAIActive = !isAIActive;
+    isListening = isAIActive;
     
     const toggleBtn = document.getElementById('ai-toggle');
     const toggleText = toggleBtn?.querySelector('.ai-toggle-text');
     const listeningIndicator = document.getElementById('ai-listening-indicator');
     
-    if (toggleBtn) {
-        toggleBtn.classList.add('active');
-        toggleBtn.disabled = true;
+    if (isAIActive) {
+        // Turn AI ON
+        console.log('🤖 AI monitoring enabled');
+        if (toggleBtn) toggleBtn.classList.add('active');
+        if (toggleText) toggleText.textContent = 'AI On';
+        if (listeningIndicator) listeningIndicator.classList.add('active');
+        
+        startPassiveListening();
+        localStorage.setItem('aiAssistantEnabled', 'true');
+        
+        displaySystemMessage(
+            '🤖 AI monitoring enabled - I\'ll provide insights and suggestions as you chat.',
+            'info-message'
+        );
+    } else {
+        // Turn AI OFF
+        console.log('🤖 AI monitoring disabled');
+        if (toggleBtn) toggleBtn.classList.remove('active');
+        if (toggleText) toggleText.textContent = 'AI Off';
+        if (listeningIndicator) listeningIndicator.classList.remove('active');
+        
+        stopPassiveListening();
+        localStorage.setItem('aiAssistantEnabled', 'false');
+        
+        displaySystemMessage(
+            '🤖 AI monitoring disabled - Use /ai command or AI button for direct questions.',
+            'info-message'
+        );
     }
-    if (toggleText) {
-        toggleText.textContent = 'AI On';
-    }
-    if (listeningIndicator) {
-        listeningIndicator.classList.add('active');
-    }
-    
-    // Ensure passive listening is active
-    startPassiveListening();
-    localStorage.setItem('aiAssistantEnabled', 'true');
 }
 
 function showAITypingIndicator() {
@@ -778,11 +786,14 @@ function displayAIMessage(text, tools = null, metrics = null) {
     contentDiv.className = 'message-content';
     
     try {
-        contentDiv.innerHTML = `<strong>🤖 AI Assistant:</strong><br>${escapeHtml(text)}`;
-        console.log('[AI] ✅ Content HTML set');
+        // Parse markdown for AI responses - this renders code blocks, lists, etc.
+        const parsedContent = parseMarkdown(text);
+        contentDiv.innerHTML = `<strong>🤖 AI Assistant:</strong><br>${parsedContent}`;
+        console.log('[AI] ✅ Content HTML set with markdown parsing');
     } catch (error) {
-        console.error('[AI] ❌ Error setting innerHTML:', error);
-        contentDiv.innerHTML = `<strong>🤖 AI Assistant:</strong><br>${text}`;
+        console.error('[AI] ❌ Error parsing markdown:', error);
+        // Fallback to escaped HTML if markdown parsing fails
+        contentDiv.innerHTML = `<strong>🤖 AI Assistant:</strong><br>${escapeHtml(text)}`;
     }
     
     // Display tools used
@@ -1288,6 +1299,49 @@ function updateConnectionStatus(connected, message = '') {
     elements.connectionStatus.className = connected ? 'connected' : 'disconnected';
 }
 
+/**
+ * Parse markdown content to HTML using marked.js
+ * @param {string} content - Raw markdown content
+ * @returns {string} - Parsed HTML
+ */
+function parseMarkdown(content) {
+    if (typeof marked === 'undefined') {
+        console.warn('Marked.js not loaded, returning plain content');
+        return escapeHtml(content);
+    }
+    
+    try {
+        // Configure marked for security and proper rendering
+        marked.setOptions({
+            breaks: true,          // Convert \n to <br>
+            gfm: true,            // GitHub Flavored Markdown
+            headerIds: false,     // Don't add IDs to headers
+            mangle: false,        // Don't escape emails
+            sanitize: false,      // We'll handle XSS ourselves
+        });
+        
+        return marked.parse(content);
+    } catch (error) {
+        console.error('Error parsing markdown:', error);
+        return escapeHtml(content);
+    }
+}
+
+/**
+ * Check if a message should be rendered as markdown
+ * @param {string} sender - Message sender
+ * @param {string} messageType - Type of message
+ * @returns {boolean}
+ */
+function shouldUseMarkdown(sender, messageType) {
+    // Use markdown for AI assistant messages
+    const senderName = (sender.username || sender || '').toLowerCase();
+    return senderName.includes('assistant') || 
+           senderName.includes('ai') || 
+           messageType === 'ai_message' ||
+           messageType === 'ai-suggestion';
+}
+
 function displayMessage({ sender, content, messageType = 'chat_message', timestamp, isHistory = false }) {
     if (!elements.chatMessages) return;
     
@@ -1295,6 +1349,11 @@ function displayMessage({ sender, content, messageType = 'chat_message', timesta
     messageElement.className = `message ${messageType}${isHistory ? ' history-message' : ''}`;
     
     const timeString = formatTime(timestamp);
+    
+    // Determine if we should parse markdown
+    const useMarkdown = shouldUseMarkdown(sender, messageType);
+    const processedContent = useMarkdown ? parseMarkdown(content) : escapeHtml(content);
+    
     messageElement.innerHTML = `
         <div class="message-header">
             <span class="sender" style="color: ${getUserColor(sender.id || sender)}">
@@ -1303,7 +1362,7 @@ function displayMessage({ sender, content, messageType = 'chat_message', timesta
             <span class="time">${timeString}</span>
             ${isHistory ? '<span class="history-badge">history</span>' : ''}
         </div>
-        <div class="message-content">${content}</div>
+        <div class="message-content">${processedContent}</div>
     `;
     
     elements.chatMessages.appendChild(messageElement);
@@ -1656,31 +1715,35 @@ async function initialize() {
         
         await setupEventListeners();
         
-        // IMPORTANT: AI monitoring is ALWAYS enabled (mandatory for empathy monitoring)
-        console.log('🤖 AI monitoring ALWAYS ACTIVE (mandatory)');
+        // Initialize AI state from localStorage (user preference)
+        const aiEnabled = localStorage.getItem('aiAssistantEnabled') === 'true';
+        console.log('🤖 AI monitoring state from localStorage:', aiEnabled);
+        
         const toggleBtn = document.getElementById('ai-toggle');
         const toggleText = toggleBtn?.querySelector('.ai-toggle-text');
         const listeningIndicator = document.getElementById('ai-listening-indicator');
         
-        // Force AI to be always on
-        isAIActive = true;
-        isListening = true;
+        // Set AI state based on user preference
+        isAIActive = aiEnabled;
+        isListening = aiEnabled;
         
         if (toggleBtn && toggleText) {
-            toggleBtn.classList.add('active');
-            toggleBtn.disabled = true;  // Disable toggle - AI is mandatory
-            toggleBtn.title = 'AI monitoring is always active';
-            toggleText.textContent = 'AI On';
+            toggleBtn.disabled = false;  // Enable toggle button
+            toggleBtn.title = 'Toggle AI passive listening';
             
-            if (listeningIndicator) {
-                listeningIndicator.classList.add('active');
+            if (aiEnabled) {
+                toggleBtn.classList.add('active');
+                toggleText.textContent = 'AI On';
+                if (listeningIndicator) listeningIndicator.classList.add('active');
+                startPassiveListening();
+                console.log('🤖 AI passive listening enabled (user preference)');
+            } else {
+                toggleBtn.classList.remove('active');
+                toggleText.textContent = 'AI Off';
+                if (listeningIndicator) listeningIndicator.classList.remove('active');
+                console.log('🤖 AI passive listening disabled (user preference)');
             }
         }
-        
-        // Start passive listening (always)
-        startPassiveListening();
-        localStorage.setItem('aiAssistantEnabled', 'true');  // Force true
-        console.log('🤖 AI passive listening enabled (mandatory for all users)');
         
         await initWebSocket();
         console.log('Chat application initialized successfully');

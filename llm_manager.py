@@ -44,11 +44,12 @@ class LLMConfig:
         "gemini-1.5-flash": {"max_tokens": 8192, "supports_tools": True},
     }
     
-    # Claude Models
+    # Claude Models (New naming convention - Nov 2024+)
     CLAUDE_MODELS = {
-        "claude-3-5-sonnet-20241022": {"max_tokens": 8192, "supports_tools": True},
-        "claude-3-opus-20240229": {"max_tokens": 4096, "supports_tools": True},
-        "claude-3-sonnet-20240229": {"max_tokens": 4096, "supports_tools": True},
+        "claude-sonnet-4-0": {"max_tokens": 8192, "supports_tools": True},  # Latest (recommended)
+        "claude-opus-4-0": {"max_tokens": 8192, "supports_tools": True},  # Most capable
+        "claude-3-opus-20240229": {"max_tokens": 4096, "supports_tools": True},  # Legacy 3.x
+        "claude-3-sonnet-20240229": {"max_tokens": 4096, "supports_tools": True},  # Legacy 3.x
     }
     
     # LM Studio / Local Models (default endpoint)
@@ -186,7 +187,7 @@ class LLMManager:
         **kwargs
     ):
         """Get Claude LLM instance"""
-        model = model or "claude-3-5-sonnet-20241022"
+        model = model or "claude-sonnet-4-0"  # Default to latest Claude 4.0
         api_key = api_key or os.getenv("ANTHROPIC_API_KEY")
         
         if not api_key:
