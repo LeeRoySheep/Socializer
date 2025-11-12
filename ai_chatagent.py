@@ -102,8 +102,19 @@ import time
 from memory.user_agent import UserAgent
 from memory.secure_memory_manager import SecureMemoryManager
 
+# Import extracted tools (modularized)
+from tools.user import UserPreferenceTool
+from tools.skills import SkillEvaluator
+from tools.search import TavilySearchTool
+from tools.events import LifeEventTool
+from tools.communication import ClarifyCommunicationTool
+
+# Import extracted handlers (modularized)
+from app.agents import ResponseHandler, ToolHandler, MemoryHandler
+
 # Initialize the database manager
-db_path = SQLALCHEMY_DATABASE_URL.replace('sqlite:///', '')
+db_path = SQLALCHEMY_DATABASE_URL.replace('sqlite:///', ''
+)
 dm = DataManager(db_path)
 
 # Initialize tools
@@ -147,869 +158,41 @@ from typing import Type
 # ConversationRecallTool has been extracted to tools/conversation_recall_tool.py
 
 
-class UserPreferenceInput(BaseModel):
-    """Input schema for UserPreferenceTool - Gemini compatible."""
-    action: str = Field(description="Action to perform: get, set, or delete")
-    user_id: int = Field(description="The ID of the user")
-    preference_type: Optional[str] = Field(default=None, description="Category of preference")
-    preference_key: Optional[str] = Field(default=None, description="Specific preference key")
-    preference_value: Optional[str] = Field(default=None, description="Value to set")
-    confidence: Optional[float] = Field(default=None, description="Confidence score 0-1")
+# ==============================================================================
+# TOOL INSTANTIATION  
+# ==============================================================================
+# All tool classes have been extracted to tools/ directory.
+# We instantiate them here for use in the agent.
+#
+# Extracted Tools:
+#   - UserPreferenceTool → tools/user/preference_tool.py
+#   - SkillEvaluator → tools/skills/evaluator_tool.py
+#   - TavilySearchTool → tools/search/tavily_search_tool.py
+#   - LifeEventTool → tools/events/life_event_tool.py
+#   - ClarifyCommunicationTool → tools/communication/clarity_tool.py
+# ==============================================================================
 
-class UserPreferenceTool(BaseTool):
-    """Tool for managing user preferences with encryption for sensitive data."""
-    
-    name: str = "user_preference"
-    description: str = (
-        "Manage user preferences (ENCRYPTED). "
-        "Use this tool to get, set, or delete user preferences. "
-        "Personal data (name, DOB, sensitive info) is automatically encrypted."
-    )
-    args_schema: Type[BaseModel] = UserPreferenceInput
-    dm: DataManager = None
-    encryptor: Optional[Any] = None  # Properly declare for Pydantic
-    
-    def __init__(self, data_manager: DataManager):
-        super().__init__()
-        self.dm = data_manager
-        
-        # Initialize encryption for sensitive data
-        try:
-            from app.security.encryption import get_encryptor
-            self.encryptor = get_encryptor()
-        except ImportError:
-            print("⚠️  WARNING: Encryption module not available, data will be stored unencrypted!")
-            self.encryptor = None
-        except Exception as e:
-            print(f"⚠️  WARNING: Could not initialize encryption: {e}")
-            self.encryptor = None
-    
-    def _run(self, *args, **kwargs) -> dict:
-        """Execute the preference tool.
-        
-        Args:
-            action: The action to perform (get/set/delete)
-            user_id: The ID of the user
-            preference_type: The type/category of preference (required for set/delete)
-            preference_key: The specific preference key (required for set/delete)
-            preference_value: The value to set (required for set)
-            confidence: Confidence score (0-1) for the preference (optional for set)
-            
-        Returns:
-            Dictionary with the result of the operation
-        """
-        # Handle both direct kwargs and input dict
-        if not kwargs and args and isinstance(args[0], dict):
-            kwargs = args[0]
-            
-        action = kwargs.get("action", "").lower()
-        user_id = kwargs.get("user_id")
-        
-        if not user_id:
-            return {"status": "error", "message": "user_id is required"}
-        
-        try:
-            if action == "get":
-                preference_type = kwargs.get("preference_type")
-                preferences_dict = self.dm.get_user_preferences(user_id, preference_type)
-                
-                # ✅ DECRYPT sensitive preferences before returning
-                # preferences_dict format: {"type.key": "value"}
-                decrypted_prefs = []
-                
-                if preferences_dict:
-                    for full_key, value in preferences_dict.items():
-                        # Split "personal_info.favorite_color" -> ["personal_info", "favorite_color"]
-                        if '.' in full_key:
-                            pref_type, pref_key = full_key.split('.', 1)
-                        else:
-                            pref_type = "general"
-                            pref_key = full_key
-                        
-                        # Decrypt if it's sensitive data and encrypted
-                        decrypted_value = value
-                        is_encrypted = False
-                        
-                        if self.encryptor and self._is_sensitive_type(pref_type):
-                            if value and self.encryptor.is_encrypted(value):
-                                try:
-                                    decrypted_value = self.encryptor.decrypt(value)
-                                    is_encrypted = True
-                                except Exception as e:
-                                    print(f"Decryption error for {full_key}: {e}")
-                        
-                        decrypted_prefs.append({
-                            "preference_type": pref_type,
-                            "preference_key": pref_key,
-                            "preference_value": decrypted_value,
-                            "encrypted": is_encrypted
-                        })
-                
-                return {
-                    "status": "success",
-                    "preferences": decrypted_prefs,
-                    "total": len(decrypted_prefs),
-                    "encryption_enabled": bool(self.encryptor)
-                }
-                
-            elif action == "set":
-                required = ["preference_type", "preference_key", "preference_value"]
-                if not all(k in kwargs for k in required):
-                    return {
-                        "status": "error",
-                        "message": f"Missing required fields. Required: {', '.join(required)}"
-                    }
-                
-                # ✅ ENCRYPT sensitive data before storing
-                preference_value = kwargs["preference_value"]
-                preference_type = kwargs["preference_type"]
-                
-                if self.encryptor and self._is_sensitive_type(preference_type):
-                    try:
-                        preference_value = self.encryptor.encrypt(preference_value)
-                    except Exception as e:
-                        return {
-                            "status": "error",
-                            "message": f"Encryption failed: {str(e)}"
-                        }
-                
-                success = self.dm.set_user_preference(
-                    user_id=user_id,
-                    preference_type=preference_type,
-                    preference_key=kwargs["preference_key"],
-                    preference_value=preference_value,
-                    confidence=kwargs.get("confidence", 1.0)
-                )
-                
-                if success:
-                    return {
-                        "status": "success",
-                        "message": "Preference set successfully (encrypted)" if self.encryptor and self._is_sensitive_type(preference_type) else "Preference set successfully",
-                        "encrypted": bool(self.encryptor and self._is_sensitive_type(preference_type))
-                    }
-                else:
-                    return {
-                        "status": "error",
-                        "message": "Failed to set preference"
-                    }
-                    
-            elif action == "delete":
-                preference_type = kwargs.get("preference_type")
-                preference_key = kwargs.get("preference_key")
-                
-                if not preference_type and not preference_key:
-                    return {
-                        "status": "error",
-                        "message": "Must provide at least one of preference_type or preference_key"
-                    }
-                
-                success = self.dm.delete_user_preference(
-                    user_id=user_id,
-                    preference_type=preference_type,
-                    preference_key=preference_key
-                )
-                
-                if success:
-                    return {
-                        "status": "success",
-                        "message": "Preferences deleted successfully"
-                    }
-                else:
-                    return {
-                        "status": "error",
-                        "message": "No matching preferences found to delete"
-                    }
-            else:
-                return {
-                    "status": "error",
-                    "message": f"Invalid action: {action}. Must be one of: get, set, delete"
-                }
-                
-        except Exception as e:
-            return {
-                "status": "error",
-                "message": f"Error in UserPreferenceTool: {str(e)}"
-            }
-    
-    def _is_sensitive_type(self, preference_type: str) -> bool:
-        """
-        Determine if a preference type contains sensitive data that should be encrypted.
-        
-        Args:
-            preference_type: The type of preference
-            
-        Returns:
-            bool: True if sensitive data requiring encryption
-        """
-        sensitive_types = {
-            'personal_info',    # Name, DOB, address, etc.
-            'contact',          # Email, phone, etc.
-            'financial',        # Payment info
-            'medical',          # Health data
-            'identification',   # ID numbers, SSN, etc.
-            'private'           # Explicitly private data
-        }
-        return preference_type.lower() in sensitive_types
-    
-    async def _arun(self, *args, **kwargs):
-        """Async version of run."""
-        return self._run(*args, **kwargs)
+# Legacy Tavily search (keep for compatibility)
+tavily_search_tool = tool_1
 
-
-class SkillEvaluatorInput(BaseModel):
-    """Input schema for SkillEvaluator - Gemini compatible."""
-    user_id: int = Field(description="The ID of the user to evaluate")
-    message: Optional[str] = Field(default=None, description="Single message to evaluate")
-    messages: Optional[List[str]] = Field(default=None, description="List of messages to evaluate")
-    cultural_context: Optional[str] = Field(default="Western", description="User's cultural background")
-    use_web_research: Optional[bool] = Field(default=True, description="Whether to fetch latest research")
-
-class SkillEvaluator(BaseTool):
-    """Evaluates user skills based on chat interactions and manages training."""
-
-    name: str = "skill_evaluator"
-    description: str = (
-        "Evaluate user skills based on chat interactions and manage training. "
-        "Analyzes messages for active listening, empathy, clarity, and engagement."
-    )
-    args_schema: Type[BaseModel] = SkillEvaluatorInput
-    dm: DataManager = None
-    orchestrator: Optional[SkillEvaluationOrchestrator] = None
-    skills: Dict[str, Dict[str, Any]] = {}
-
-    def __init__(self, data_manager: DataManager):
-        super().__init__()
-        self.dm = data_manager
-        self.orchestrator = get_evaluation_orchestrator(data_manager)
-        atexit.register(self.cleanup)
-
-        # Define skills for training purposes
-        self.skills = {
-            "active_listening": {
-                "description": "Ability to actively listen and respond appropriately",
-                "keywords": ["i understand", "i hear you", "that makes sense"],
-            },
-            "empathy": {
-                "description": "Ability to show understanding and share feelings",
-                "keywords": ["i understand how you feel", "that must be"],
-            },
-            "clarity": {
-                "description": "Clear and concise communication",
-                "keywords": ["let me explain", "to clarify"],
-            },
-            "engagement": {
-                "description": "Keeping the conversation engaging",
-                "keywords": ["what do you think", "how about you"],
-            },
-        }
-
-    def cleanup(self, user_id: int = None):
-        """Clean up resources when the evaluator is destroyed.
-        
-        Args:
-            user_id: Optional user ID to generate skill suggestions for
-        """
-        if self.orchestrator:
-            try:
-                if user_id is not None:
-                    suggestions = self.get_skill_suggestions(user_id)
-                    if suggestions:
-                        print("\nSkill Suggestions:")
-                        for suggestion in suggestions:
-                            print(f"- {suggestion['skill_name']}: {suggestion['suggestion']}")
-            except Exception as e:
-                print(f"Error generating skill suggestions: {e}")
-                
-            stop_evaluation_orchestrator()
-
-    def _run(self, *args, **kwargs) -> Dict[str, Any]:
-        """Run the skill evaluator tool using the multi-agent system with web research.
-
-        Args:
-            user_id: The ID of the user to evaluate
-            message: The message to evaluate for skills (optional if messages is provided)
-            messages: List of messages to evaluate (optional if message is provided)
-            cultural_context: User's cultural background (optional)
-            use_web_research: Whether to fetch latest empathy research (default: True)
-
-        Returns:
-            Dict containing skill scores, suggestions, and latest research
-        """
-        try:
-            # Handle both direct kwargs and nested input dict
-            if not kwargs and len(args) == 1 and isinstance(args[0], dict):
-                kwargs = args[0]
-                
-            user_id = kwargs.get('user_id')
-            message = kwargs.get('message')
-            messages = kwargs.get('messages', [message] if message else [])
-            cultural_context = kwargs.get('cultural_context', 'Western')
-            use_web_research = kwargs.get('use_web_research', True)
-            
-            if not user_id:
-                return {"status": "error", "message": "User ID is required"}
-                
-            if not messages:
-                return {"status": "error", "message": "No message or messages provided"}
-            
-            # ✅ NEW: Get latest empathy research from web
-            latest_standards = None
-            if use_web_research:
-                try:
-                    # Search for latest empathy and social skills research
-                    research_query = f"latest {cultural_context} empathy social skills research 2024 2025"
-                    research_result = tool_1.invoke(research_query)
-                    latest_standards = {
-                        "query": research_query,
-                        "research": str(research_result)[:500],  # Limit to 500 chars
-                        "updated": "2025-10-15"
-                    }
-                except Exception as e:
-                    print(f"Web research failed: {e}")
-            
-            # Get current skill levels BEFORE analysis
-            current_skills_before = self.get_skill_suggestions(user_id)
-            
-            # Analyze message for skill demonstration
-            analysis = self._analyze_message_skills(message if isinstance(message, str) else str(messages), cultural_context)
-            
-            # ✅ UPDATE DATABASE: Save detected skills to track progress
-            detected_skills = analysis.get('detected_skills', [])
-            skills_updated = []
-            
-            if detected_skills:
-                for skill_obj in detected_skills:
-                    try:
-                        # Extract skill name from dict (detected_skills contains dicts, not strings)
-                        skill_name = skill_obj.get('skill') if isinstance(skill_obj, dict) else str(skill_obj)
-                        
-                        # Get or create the skill
-                        skill = self.dm.get_or_create_skill(skill_name)
-                        if skill:
-                            # Get current level
-                            current_level = self.dm.get_skilllevel_for_user(user_id, skill.id) or 0
-                            
-                            # Increment level (max 10)
-                            new_level = min(current_level + 1, 10)
-                            
-                            # Update in database
-                            self.dm.set_skill_for_user(user_id, skill, new_level)
-                            skills_updated.append({
-                                "skill": skill_name,
-                                "old_level": current_level,
-                                "new_level": new_level,
-                                "improved": new_level > current_level
-                            })
-                            print(f"✅ Updated {skill_name}: {current_level} → {new_level}")
-                    except Exception as e:
-                        print(f"⚠️ Failed to update skill {skill_name}: {e}")
-            
-            # Get updated skill levels AFTER analysis
-            current_skills_after = self.get_skill_suggestions(user_id)
-            
-            return {
-                "status": "success",
-                "message": f"Skill evaluation completed with latest research. {len(skills_updated)} skills updated.",
-                "current_skills": current_skills_after,
-                "skills_updated": skills_updated,  # Show what changed
-                "message_analysis": analysis,
-                "latest_standards": latest_standards,
-                "cultural_context": cultural_context,
-                "user_id": user_id
-            }
-            
-        except Exception as e:
-            return {
-                "status": "error",
-                "message": f"An error occurred while evaluating skills: {str(e)}",
-                "current_skills": self.get_skill_suggestions(user_id) if 'user_id' in locals() else []
-            }
-    
-    def _analyze_message_skills(self, message: str, cultural_context: str = "Western") -> Dict[str, Any]:
-        """Analyze a message for social skill demonstration.
-        
-        Args:
-            message: The message to analyze
-            cultural_context: Cultural context for evaluation
-            
-        Returns:
-            Analysis results with detected skills
-        """
-        message_lower = message.lower()
-        detected_skills = []
-        
-        for skill_name, data in self.skills.items():
-            keywords = data.get('keywords', [])
-            if any(keyword.lower() in message_lower for keyword in keywords):
-                detected_skills.append({
-                    "skill": skill_name,
-                    "detected": True,
-                    "keywords_found": [kw for kw in keywords if kw.lower() in message_lower]
-                })
-        
-        return {
-            "message_length": len(message),
-            "detected_skills": detected_skills,
-            "skill_count": len(detected_skills),
-            "cultural_context": cultural_context,
-            "needs_improvement": len(detected_skills) < 2  # Less than 2 skills detected
-        }
-    
-    def get_skill_suggestions(self, user_id: int) -> List[Dict[str, Any]]:
-        """Get the current skills and suggestions for a user.
-        
-        Args:
-            user_id: The ID of the user
-            
-        Returns:
-            List of dictionaries containing skill information and suggestions
-        """
-        suggestions = []
-        try:
-            for skill_name, data in self.skills.items():
-                skill = self.dm.get_or_create_skill(skill_name)
-                if not skill:
-                    continue
-                    
-                level = self.dm.get_skilllevel_for_user(user_id, skill.id)
-                if level is None:
-                    level = 0
-                    
-                # Always include all skills with their current levels
-                suggestion = {
-                    "skill": skill_name,
-                    "current_level": level,
-                    "max_level": 10,  # Maximum possible skill level
-                    "description": data.get("description", "No description available"),
-                    "suggestion": f"Try using phrases like: {', '.join(data.get('keywords', ['practice more']))[:2]}..." if data.get('keywords') else "Keep practicing to improve this skill",
-                    "needs_improvement": level < 7  # Flag for skills that need work
-                }
-                
-                # Add specific feedback based on skill level
-                if level >= 8:
-                    suggestion["feedback"] = "Excellent! You've mastered this skill."
-                elif level >= 5:
-                    suggestion["feedback"] = "Good progress! Keep it up!"
-                else:
-                    suggestion["feedback"] = "Let's work on improving this skill."
-                
-                suggestions.append(suggestion)
-                
-            # Sort suggestions by level (lowest first)
-            suggestions.sort(key=lambda x: x["current_level"])
-            
-        except Exception as e:
-            print(f"Error generating skill suggestions: {e}")
-            # Return a basic response if there's an error
-            return [{
-                "status": "error",
-                "message": "Could not retrieve skill information. Please try again later."
-            }]
-            
-        return suggestions
-
-
-class TavilySearchInput(BaseModel):
-    """Input schema for TavilySearchTool - Gemini compatible."""
-    query: str = Field(description="The search query string")
-
-class TavilySearchTool(BaseTool):
-    name: str = "tavily_search"
-    description: str = """Search the web for current information.
-    
-    Use this tool when you need to find up-to-date information, current events, 
-    or real-time data like time, weather, news, etc.
-    
-    Input: A search query string (e.g. 'current weather in Paris', 'latest news')
-    """
-    args_schema: Type[BaseModel] = TavilySearchInput
-    search_tool: Any = None  # This needs to be a class variable for Pydantic
-    
-    def __init__(self, search_tool, **data):
-        # Initialize the BaseTool first
-        super().__init__(**data)
-        # Then set the search tool
-        object.__setattr__(self, 'search_tool', search_tool)
-    
-    def _run(self, query: str, **kwargs):
-        """Execute the search tool synchronously."""
-        return self._execute_search(query)
-    
-    async def _arun(self, query: str, **kwargs):
-        """Execute the search tool asynchronously."""
-        return self._execute_search(query)
-    
-    def _execute_search(self, query):
-        """Execute search and return formatted results."""
-        try:
-            print(f"Executing search with query: {query}")
-            if not query:
-                return "No search query provided."
-                
-            # Handle both string and dict queries
-            search_query = query.get('query', '') if isinstance(query, dict) else str(query)
-            if not search_query.strip():
-                return "Empty search query provided."
-                
-            # Execute the search
-            print(f"Searching for: {search_query}")
-            result = self.search_tool.invoke(search_query)
-            
-            # Handle different result formats
-            if not result:
-                return "No results found."
-                
-            if isinstance(result, str):
-                return result[:2000]  # Limit length
-                
-            if isinstance(result, dict):
-                # Handle weather API response
-                if 'current' in result and 'condition' in result['current']:
-                    weather = result['current']
-                    location = result.get('location', {})
-                    return (
-                        f"Current weather in {location.get('name', 'the location')}:\n"
-                        f"- Condition: {weather['condition']['text']}\n"
-                        f"- Temperature: {weather.get('temp_c', 'N/A')}°C ({weather.get('temp_f', 'N/A')}°F)\n"
-                        f"- Feels like: {weather.get('feelslike_c', 'N/A')}°C ({weather.get('feelslike_f', 'N/A')}°F)\n"
-                        f"- Wind: {weather.get('wind_kph', 'N/A')} km/h ({weather.get('wind_mph', 'N/A')} mph) {weather.get('wind_dir', '')}\n"
-                        f"- Humidity: {weather.get('humidity', 'N/A')}%"
-                    )
-                
-                # Handle Tavily search results
-                if 'results' in result and result['results']:
-                    # Return the first result's content or description
-                    top_result = result['results'][0]
-                    return top_result.get('content') or top_result.get('description', 'No content available')
-                
-                # Fallback to string representation
-                return str(result)[:2000]
-                
-            return str(result)[:2000]  # Limit length of any other type
-            
-        except Exception as e:
-            error_msg = f"Error in Tavily search: {str(e)}"
-            print(error_msg)
-            import traceback
-            traceback.print_exc()
-            return f"I encountered an error while searching: {str(e)}"
-    
-    def invoke(self, input_data):
-        """Handle tool invocation with flexible input format."""
-        print(f"TavilySearchTool invoked with input: {input_data}")
-        try:
-            if isinstance(input_data, dict) and 'query' in input_data:
-                return self._execute_search(input_data['query'])
-            elif isinstance(input_data, str):
-                return self._execute_search(input_data)
-            else:
-                return "Error: Invalid input format. Please provide a search query or a dictionary with a 'query' key."
-        except Exception as e:
-            return {"error": f"Error performing search: {str(e)}"}
-
-# Import the database URL from config
-import os
-import sys
-from pathlib import Path
-
-# Add the project root to the Python path
-project_root = str(Path(__file__).resolve().parent.parent)
-if project_root not in sys.path:
-    sys.path.append(project_root)
-
-from app.config import SQLALCHEMY_DATABASE_URL
-from datamanager.data_manager import DataManager
-
-# Extract the database path from the URL
-db_path = SQLALCHEMY_DATABASE_URL.replace('sqlite:///', '')
-
-# Initialize tools and evaluator with the same database as the main app
-dm = DataManager(db_path)
+# Instantiate extracted tools
 conversation_recall = ConversationRecallTool(dm)
 skill_evaluator = SkillEvaluator(dm)
 user_preference_tool = UserPreferenceTool(dm)
-tavily_search_tool = TavilySearchTool(tool_1)
-
-from datetime import datetime, date
-import json
-import os
-from typing import Dict, List, Any, Optional, Type, Union
-
-from dotenv import load_dotenv
-from langchain.chat_models import init_chat_model
-from langchain_core.messages import AIMessage, SystemMessage, ToolMessage, HumanMessage
-
-class LifeEventInput(BaseModel):
-    """Input model for life event operations - Gemini compatible."""
-    action: str = Field(description="Action to perform: add, get, update, delete, list, timeline")
-    user_id: int = Field(description="ID of the user")
-    event_id: Optional[int] = Field(default=None, description="ID of the event")
-    event_type: Optional[str] = Field(default=None, description="Type of the event")
-    title: Optional[str] = Field(default=None, description="Title of the event")
-    description: Optional[str] = Field(default=None, description="Detailed description")
-    start_date: Optional[str] = Field(default=None, description="When event started YYYY-MM-DD")
-    end_date: Optional[str] = Field(default=None, description="When event ended YYYY-MM-DD")
-    location: Optional[str] = Field(default=None, description="Where event occurred")
-    impact_level: Optional[int] = Field(default=None, description="Importance level 1-10")
-    is_private: Optional[bool] = Field(default=True, description="Whether event is private")
-    limit: Optional[int] = Field(default=50, description="Maximum events to return")
-    offset: Optional[int] = Field(default=0, description="Offset for pagination")
-
-    @field_validator('start_date', 'end_date', mode='before')
-    @classmethod
-    def parse_dates(cls, v):
-        if isinstance(v, str):
-            try:
-                return datetime.fromisoformat(v)
-            except (ValueError, TypeError):
-                try:
-                    return datetime.strptime(v, '%Y-%m-%d')
-                except (ValueError, TypeError):
-                    pass
-        return v
-
-class LifeEventTool(BaseTool):
-    """Tool for managing user life events."""
-    
-    name: str = "life_event"
-    description: str = """
-    Manage and track important life events for users. 
-    Use this tool to record significant life events like birthdays, graduations, job changes, etc.
-    """
-    args_schema: Type[BaseModel] = LifeEventInput
-    dm: Any = None
-    event_manager: Any = None  # Add this line to properly declare the field
-    
-    def __init__(self, data_manager, **kwargs):
-        super().__init__(**kwargs)
-        self.dm = data_manager
-        # Initialize LifeEventManager with the DataManager instance
-        object.__setattr__(self, 'event_manager', LifeEventManager(data_manager))
-    
-    def _run(self, *args, **kwargs) -> Dict[str, Any]:
-        """Execute the life event tool synchronously."""
-        return self._handle_event(kwargs)
-    
-    async def _arun(self, *args, **kwargs) -> Dict[str, Any]:
-        """Execute the life event tool asynchronously."""
-        return self._handle_event(kwargs)
-    
-    def _handle_event(self, data: Dict[str, Any]) -> Dict[str, Any]:
-        """Handle life event operations."""
-        action = data.get('action', '').lower()
-        user_id = data.get('user_id')
-        
-        if not user_id:
-            return {"status": "error", "message": "User ID is required"}
-        
-        try:
-            if action == 'add':
-                return self._add_event(user_id, data)
-            elif action == 'get':
-                return self._get_event(user_id, data.get('event_id'))
-            elif action == 'update':
-                return self._update_event(user_id, data)
-            elif action == 'delete':
-                return self._delete_event(user_id, data.get('event_id'))
-            elif action == 'list':
-                return self._list_events(user_id, data)
-            elif action == 'timeline':
-                return self._get_timeline(user_id)
-            else:
-                return {"status": "error", "message": f"Unknown action: {action}"}
-        except Exception as e:
-            return {"status": "error", "message": f"Error in life event tool: {str(e)}"}
-    
-    def _add_event(self, user_id: int, data: Dict[str, Any]) -> Dict[str, Any]:
-        """Add a new life event."""
-        event_data = {
-            "user_id": user_id,
-            "event_type": data.get('event_type', 'OTHER'),
-            "title": data.get('title', 'Untitled Event'),
-            "description": data.get('description', ''),
-            "start_date": data.get('start_date', datetime.utcnow()),
-            "end_date": data.get('end_date'),
-            "location": data.get('location'),
-            "people_involved": data.get('people_involved', []),
-            "impact_level": data.get('impact_level', 5),
-            "is_private": data.get('is_private', True),
-            "tags": data.get('tags', []),
-            "metadata": data.get('metadata', {})
-        }
-        
-        event = self.event_manager.add_event(event_data)
-        return {
-            "status": "success",
-            "message": "Life event added successfully",
-            "event": event.dict() if event else None
-        }
-    
-    def _get_event(self, user_id: int, event_id: int) -> Dict[str, Any]:
-        """Get a specific event."""
-        if not event_id:
-            return {"status": "error", "message": "Event ID is required"}
-            
-        event = self.event_manager.get_event(event_id, user_id)
-        if not event:
-            return {"status": "error", "message": "Event not found"}
-            
-        return {
-            "status": "success",
-            "event": event.dict()
-        }
-    
-    def _update_event(self, user_id: int, data: Dict[str, Any]) -> Dict[str, Any]:
-        """Update an existing event."""
-        event_id = data.get('event_id')
-        if not event_id:
-            return {"status": "error", "message": "Event ID is required for update"}
-            
-        # Remove None values and action/event_id from update data
-        update_data = {k: v for k, v in data.items() 
-                      if v is not None and k not in ('action', 'event_id')}
-                      
-        if not update_data:
-            return {"status": "error", "message": "No update data provided"}
-            
-        event = self.event_manager.update_event(event_id, user_id, update_data)
-        if not event:
-            return {"status": "error", "message": "Failed to update event"}
-            
-        return {
-            "status": "success",
-            "message": "Event updated successfully",
-            "event": event.dict()
-        }
-    
-    def _delete_event(self, user_id: int, event_id: int) -> Dict[str, Any]:
-        """Delete an event."""
-        if not event_id:
-            return {"status": "error", "message": "Event ID is required"}
-            
-        success = self.event_manager.delete_event(event_id, user_id)
-        if not success:
-            return {"status": "error", "message": "Failed to delete event"}
-            
-        return {
-            "status": "success",
-            "message": "Event deleted successfully"
-        }
-    
-    def _list_events(self, user_id: int, data: Dict[str, Any]) -> Dict[str, Any]:
-        """List events with optional filtering."""
-        events = self.event_manager.get_user_events(
-            user_id=user_id,
-            event_type=data.get('event_type'),
-            limit=data.get('limit', 50),
-            offset=data.get('offset', 0)
-        )
-        
-        return {
-            "status": "success",
-            "count": len(events),
-            "events": [e.dict() for e in events]
-        }
-    
-    def _get_timeline(self, user_id: int) -> Dict[str, Any]:
-        """Get a timeline of events grouped by year."""
-        timeline = self.event_manager.get_timeline(user_id)
-        
-        # Convert Pydantic models to dicts for JSON serialization
-        timeline_dict = {
-            str(year): [e.dict() for e in events] 
-            for year, events in timeline.items()
-        }
-        
-        return {
-            "status": "success",
-            "timeline": timeline_dict
-        }
-
-
-class ClarifyCommunicationInput(BaseModel):
-    """Input for clarifying communication between users."""
-    text: str = Field(..., description="The text that needs clarification or translation")
-    source_language: Optional[str] = Field(None, description="Source language if known")
-    target_language: Optional[str] = Field("English", description="Target language (default: English)")
-    context: Optional[str] = Field(None, description="Additional context about the conversation")
-
-
-class ClarifyCommunicationTool(BaseTool):
-    """Tool to clarify communication and translate between users who don't understand each other."""
-    
-    name: str = "clarify_communication"
-    description: str = """Use this tool when users don't understand each other or when translation/clarification is needed.
-    
-    This tool helps with:
-    - Translating foreign language text
-    - Explaining phrases or cultural context
-    - Detecting misunderstandings
-    - Providing clear explanations
-    - Bridging language barriers
-    
-    Input should include the text that needs clarification."""
-    args_schema: Type[BaseModel] = ClarifyCommunicationInput
-    
-    def _run(self, text: str, source_language: Optional[str] = None, 
-             target_language: str = "English", context: Optional[str] = None) -> Dict[str, Any]:
-        """Clarify communication by translating and explaining text."""
-        
-        # Detect if text contains non-ASCII (foreign language)
-        has_foreign_chars = any(ord(char) > 127 for char in text)
-        
-        # Use LLM to translate and explain
-        try:
-            clarification_prompt = f"""You are a translation and communication clarification assistant in PROACTIVE MODE.
-
-Text to clarify: "{text}"
-Source language: {source_language or "Auto-detect"}
-Target language: {target_language}
-Context: {context or "General conversation"}
-
-IMPORTANT: Be direct and helpful. DO NOT ask if they want help. PROVIDE the help immediately.
-
-Provide immediately:
-1. Direct translation to {target_language} (if foreign language detected)
-2. Clear explanation of what was meant
-3. Cultural context if relevant
-4. Clarification of any ambiguity
-
-Format: Start with the translation/clarification directly. Be concise and clear.
-Example: "They said: [translation]. This means [explanation]."
-
-DO NOT say "Would you like me to..." or "I can help..." - JUST HELP."""
-
-            response = llm.invoke(clarification_prompt)
-            
-            result = {
-                "original_text": text,
-                "has_foreign_language": has_foreign_chars,
-                "clarification": response.content,
-                "suggested_response": f"Based on '{text}', here's what they meant: {response.content}"
-            }
-            
-            return result
-            
-        except Exception as e:
-            return {
-                "error": f"Error clarifying communication: {str(e)}",
-                "original_text": text
-            }
-    
-    def invoke(self, input_data):
-        """Handle tool invocation."""
-        if isinstance(input_data, dict):
-            return self._run(**input_data)
-        elif isinstance(input_data, str):
-            return self._run(text=input_data)
-        else:
-            return {"error": "Invalid input format for clarify_communication"}
-
-
+life_event_tool = LifeEventTool(dm)
 clarify_tool = ClarifyCommunicationTool()
 format_tool = FormatTool()
 
-tools = [tavily_search_tool, conversation_recall, skill_evaluator, user_preference_tool, LifeEventTool(dm), clarify_tool, format_tool]
+# Combine all tools for agent
+tools = [
+    tavily_search_tool,
+    conversation_recall,
+    skill_evaluator,
+    user_preference_tool,
+    life_event_tool,
+    clarify_tool,
+    format_tool
+]
 
 memory = InMemorySaver()
 
@@ -1022,107 +205,10 @@ class State(TypedDict):
     messages: Annotated[list, add_messages]
 
 
-class BasicToolNode:
-    """A node that runs the tools requested in the last AIMessage."""
-
-    def __init__(self, tools: list, response_handler=None) -> None:
-        """
-        Initialize BasicToolNode.
-        
-        Parameters:
-        -----------
-        tools : list
-            List of tools to make available
-        response_handler : GeminiResponseHandler, optional
-            Response handler for formatting tool results
-        """
-        # Create a dictionary of tools by name
-        self.tools_by_name = {}
-        for tool in tools:
-            if hasattr(tool, "name") and hasattr(tool, "invoke"):
-                self.tools_by_name[tool.name] = tool
-            elif hasattr(tool, "name"):
-                # Handle callable tools
-                self.tools_by_name[tool.name] = tool
-            elif hasattr(tool, "__name__"):
-                # Handle function tools
-                self.tools_by_name[tool.__name__] = tool
-        
-        # ✅ Store response handler for formatting
-        self.response_handler = response_handler
-
-    def __call__(self, inputs: dict):
-        if messages := inputs.get("messages", []):
-            message = messages[-1]
-        else:
-            raise ValueError("No message found in input")
-
-        outputs = []
-        if not hasattr(message, "tool_calls") or not message.tool_calls:
-            return {"messages": []}
-
-        for tool_call in message.tool_calls:
-            tool_name = tool_call["name"]
-            if tool_name not in self.tools_by_name:
-                error_msg = f"Tool '{tool_name}' not found. Available tools: {list(self.tools_by_name.keys())}"
-                outputs.append(
-                    ToolMessage(
-                        content=json.dumps({"error": error_msg}),
-                        name=tool_name,
-                        tool_call_id=tool_call["id"],
-                    )
-                )
-                continue
-
-            tool = self.tools_by_name[tool_name]
-            try:
-                # Handle different tool types
-                if hasattr(tool, "invoke"):
-                    # For tools with an invoke method (like our custom tools)
-                    if tool_name == "tavily_search":
-                        # Special handling for Tavily search to ensure proper argument passing
-                        if isinstance(tool_call["args"], dict) and "query" in tool_call["args"]:
-                            tool_result = tool.invoke(tool_call["args"]["query"])
-                        elif isinstance(tool_call["args"], str):
-                            tool_result = tool.invoke(tool_call["args"])
-                        else:
-                            tool_result = tool.invoke(tool_call["args"])
-                    else:
-                        # For other tools with invoke method
-                        tool_result = tool.invoke(tool_call["args"])
-                elif callable(tool):
-                    # For callable tools (like the original TavilySearch)
-                    tool_result = tool.invoke(tool_call["args"]["query"] if isinstance(tool_call["args"], dict) else tool_call["args"])
-                else:
-                    tool_result = {"error": f"Tool {tool_name} is not callable"}
-
-                # ✅ Format the tool result for readability
-                # Use GeminiResponseHandler if available, otherwise fallback to ResponseFormatter
-                if self.response_handler:
-                    formatted_result = self.response_handler.format_tool_result(tool_result, tool_name)
-                else:
-                    formatted_result = ResponseFormatter.format_tool_result(tool_name, tool_result)
-                    formatted_result = ResponseFormatter.clean_response(formatted_result)
-                
-                outputs.append(
-                    ToolMessage(
-                        content=formatted_result,
-                        name=tool_name,
-                        tool_call_id=tool_call["id"],
-                    )
-                )
-            except Exception as e:
-                outputs.append(
-                    ToolMessage(
-                        content=json.dumps(
-                            {"error": f"Error calling tool {tool_name}: {str(e)}"}
-                        ),
-                        name=tool_name,
-                        tool_call_id=tool_call["id"],
-                    )
-                )
-
-        return {"messages": outputs}
+# BasicToolNode class removed - now using ToolHandler from app.agents
+# ToolHandler provides the same functionality with full OTE integration
+# Alias for backwards compatibility
+BasicToolNode = ToolHandler
 
 
 class UserData:
@@ -1406,7 +492,9 @@ class AiChatagent:
         # ===================================================================
         
         # Initialize response handler for empty responses
-        self.response_handler = GeminiResponseHandler()
+        # Initialize handlers with OTE integration
+        self.response_handler = ResponseHandler()
+        self.memory_handler = MemoryHandler(self.memory_agent, self.conversation_tool)
         
         try:
             # Bind all tools to LLM (works for all providers now!)
@@ -1639,7 +727,7 @@ class AiChatagent:
                             print(f"⚠️  Detected tool loop: {tool_name} called {count} times with same args, breaking...")
                             result = {"messages": [{"role": "assistant", 
                                               "content": f"I've already searched for that information. Based on the results I found, let me provide you with the answer."}]}
-                            self._save_to_memory(state, result)
+                            self.memory_handler.save_conversation(state, result)
                             return result
             
             # If last message is an AIMessage with tool_calls, check if already executed
@@ -1703,7 +791,7 @@ class AiChatagent:
                         print("="*70 + "\n")
                         result = {"messages": [{"role": "assistant", 
                                           "content": f"I've already searched for that information. Based on the results I found earlier, let me provide you with the answer."}]}
-                        self._save_to_memory(state, result)
+                        self.memory_handler.save_conversation(state, result)
                         return result
                 
                 print(f"\n   ✅ NO DUPLICATES FOUND - This is a NEW tool call")
@@ -2109,7 +1197,7 @@ When user asks about:
                             content="I've already searched for this information. Based on the search results above, I can answer your question. Please let me know if you need any clarification or have a different question."
                         )
                         result = {"messages": [stop_message]}
-                        self._save_to_memory(state, result)
+                        self.memory_handler.save_conversation(state, result)
                         return result
                 
                 # Check each requested tool call
@@ -2222,12 +1310,12 @@ When user asks about:
                     response, messages
                 )
                 result = {"messages": [fallback_response]}
-                self._save_to_memory(state, result)
+                self.memory_handler.save_conversation(state, result)
                 return result
             
             # Regular response (no tool calls) - save to memory and return it
             result = {"messages": [response]}
-            self._save_to_memory(state, result)
+            self.memory_handler.save_conversation(state, result)
             return result
                 
         except Exception as e:
@@ -2305,185 +1393,9 @@ When user asks about:
             traceback.print_exc()
             return END
 
-    def _save_to_memory(self, state: Dict, response: Dict) -> None:
-        """
-        Save conversation messages to encrypted user memory.
-        
-        This method extracts user and AI messages from the conversation state
-        and saves them to the user's encrypted memory storage. It's called
-        automatically after each conversation turn to ensure persistence.
-        
-        The method performs a two-step save:
-        1. Finds and saves the user's message from the state
-        2. Saves the AI's response message
-        3. Immediately persists to encrypted database
-        
-        Memory Architecture:
-            Messages are saved to a UserAgent which uses:
-            - SecureMemoryManager for encryption (Fernet)
-            - Per-user encryption keys (unique per user)
-            - Automatic buffer management (saves every 5 messages)
-            - Separate storage for AI conversations vs general chat
-        
-        Args:
-            state (Dict): Current conversation state containing:
-                - messages (list): All messages in conversation
-                  Can include HumanMessage, AIMessage, ToolMessage
-                - Other state data (passed through)
-            
-            response (Dict): Response dictionary containing:
-                - messages (list): AI response messages to save
-                  Usually contains one AIMessage with content
-        
-        Returns:
-            None: Method performs side effects only (saves to memory)
-        
-        Raises:
-            No exceptions raised - errors are caught and logged
-            Prints warning if save fails but continues execution
-        
-        Side Effects:
-            - Adds messages to memory buffer via self.memory_agent
-            - Saves memory to encrypted database
-            - Prints success/error messages to console
-            - Updates user's conversation_memory field in database
-        
-        Message Format:
-            Messages are saved with this structure:
-            ```python
-            {
-                "role": "user" or "assistant",
-                "content": "message text",
-                "type": "ai"  # Marks as AI conversation (vs general chat)
-            }
-            ```
-        
-        Example:
-            >>> state = {
-            ...     "messages": [
-            ...         HumanMessage(content="Hello"),
-            ...         AIMessage(content="Hi there!")
-            ...     ]
-            ... }
-            >>> response = {"messages": [AIMessage(content="Hi there!")]}
-            >>> agent._save_to_memory(state, response)
-            💾 Conversation saved to encrypted memory
-        
-        Memory Types:
-            The method marks messages as type "ai" to distinguish them from:
-            - "chat": General chat room messages
-            - "general": Other types of messages
-            
-            This allows the system to:
-            - Recall AI conversations separately
-            - Apply different retention policies
-            - Filter by conversation type
-        
-        Message Extraction:
-            User messages are extracted by searching backwards through state:
-            1. Check for LangChain HumanMessage objects
-            2. Check for dict with role='user'
-            3. Check for objects with type='human'
-            
-            AI messages are extracted from response:
-            1. Check for dict with 'content' key
-            2. Check for AIMessage objects without tool_calls
-            3. Skips tool call messages (not saved to memory)
-        
-        Automatic Persistence:
-            After adding messages, calls memory_agent.save_memory() which:
-            - Encrypts all buffered messages
-            - Saves to database (conversation_memory field)
-            - Clears the buffer
-            - Updates metadata (timestamp, version)
-        
-        Performance:
-            - Adds ~50-100ms to response time
-            - Encryption overhead: ~10-20ms
-            - Database write: ~30-50ms
-            - Buffer size: Up to 5 messages before auto-save
-        
-        Error Handling:
-            Errors are caught and logged but don't stop execution:
-            - If message extraction fails → logs warning, continues
-            - If encryption fails → logs error, continues
-            - If database write fails → logs error, continues
-            
-            This ensures conversation continues even if memory save fails.
-        
-        Thread Safety:
-            Not thread-safe. Each user should have their own agent instance
-            to avoid race conditions on memory buffer.
-        
-        Security:
-            - All messages encrypted with user-specific key
-            - Encryption key stored securely in database
-            - Complete user isolation (cannot access other users' memory)
-            - No plaintext storage of conversation content
-        
-        Notes:
-            - Called automatically by chatbot() method
-            - Should not be called directly in normal usage
-            - Memory buffer has automatic save every 5 messages
-            - Tool call messages are excluded (only final responses)
-            - Saves both user and AI messages in one operation
-        
-        See Also:
-            - UserAgent.add_to_memory(): Adds to memory buffer
-            - UserAgent.save_memory(): Persists to database
-            - SecureMemoryManager: Encryption layer
-            - memory/: Complete memory system implementation
-        """
-        try:
-            messages = state.get("messages", [])
-            
-            # Find and save the last user message
-            for msg in reversed(messages):
-                if hasattr(msg, 'type') and msg.type == 'human':
-                    self.memory_agent.add_to_memory({
-                        "role": "user",
-                        "content": getattr(msg, 'content', ''),
-                        "type": "ai"  # This is correct - it's an AI conversation
-                    })
-                    break
-                elif isinstance(msg, dict) and msg.get('role') == 'user':
-                    self.memory_agent.add_to_memory({
-                        "role": "user",
-                        "content": msg.get('content', ''),
-                        "type": "ai"  # This is correct - it's an AI conversation
-                    })
-                    break
-                elif hasattr(msg, '__class__') and msg.__class__.__name__ == 'HumanMessage':
-                    self.memory_agent.add_to_memory({
-                        "role": "user",
-                        "content": msg.content,
-                        "type": "ai"  # This is correct - it's an AI conversation
-                    })
-                    break
-            
-            # Save AI response if present
-            if response and 'messages' in response:
-                for msg in response['messages']:
-                    if isinstance(msg, dict) and 'content' in msg:
-                        self.memory_agent.add_to_memory({
-                            "role": msg.get('role', 'assistant'),
-                            "content": msg.get('content', ''),
-                            "type": "ai"
-                        })
-                    elif hasattr(msg, 'content') and not hasattr(msg, 'tool_calls'):
-                        self.memory_agent.add_to_memory({
-                            "role": "assistant",
-                            "content": getattr(msg, 'content', ''),
-                            "type": "ai"
-                        })
-            
-            # Save immediately after adding both user and AI messages
-            # This ensures messages are persisted right away
-            self.memory_agent.save_memory()
-            print("💾 Conversation saved to encrypted memory")
-                
-        except Exception as e:
-            print(f"⚠️ Error saving to memory: {e}")
+    # _save_to_memory() method removed - now using MemoryHandler
+    # All memory operations handled by self.memory_handler.save_conversation()
+
     
     def _find_previous_tool_result(self, messages: list, tool_name: str, tool_args: dict) -> Optional[str]:
         """

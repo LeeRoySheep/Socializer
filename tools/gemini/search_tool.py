@@ -11,7 +11,7 @@ Date: 2025-10-22
 """
 
 import os
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Type
 from pydantic import BaseModel, Field
 from dotenv import load_dotenv
 
@@ -76,7 +76,7 @@ class SearchTool(GeminiToolBase):
         "and general knowledge. Use this when you need up-to-date information that "
         "you don't have in your knowledge base."
     )
-    args_schema = SearchToolInput
+    args_schema: Type[BaseModel] = SearchToolInput
     
     # Declare the tavily_client field for Pydantic
     tavily_client: Optional[Any] = None

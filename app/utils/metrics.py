@@ -169,14 +169,19 @@ class PerformanceMetrics:
         }
     
     def detect_anomalies(self, 
-                        error_threshold: float = 0.1,
-                        slow_threshold: float = 5.0) -> List[str]:
+                        error_threshold: float = 0.25,
+                        slow_threshold: float = 5.0,
+                        min_samples: int = 5) -> List[str]:
         """
         Detect performance anomalies (bug finding).
         
         Args:
-            error_threshold: Error rate threshold (0.1 = 10%)
+            error_threshold: Error rate threshold (0.25 = 25%)
+                - 25% = 1 in 4 operations failing (genuinely concerning)
+                - Lower than this causes false positives in testing/real-world
             slow_threshold: Slow operation threshold in seconds
+            min_samples: Minimum samples before anomaly detection (default: 5)
+                - Prevents false positives from small sample sizes
             
         Returns:
             List of anomaly descriptions
@@ -185,18 +190,23 @@ class PerformanceMetrics:
             >>> anomalies = tracker.detect_anomalies()
             >>> for anomaly in anomalies:
             ...     print(anomaly)
-            ⚠️  HIGH ERROR RATE in save_preference: 15.5% (threshold: 10%)
+            ⚠️  HIGH ERROR RATE in save_preference: 30.5% (threshold: 25%)
             🐌 SLOW OPERATION db_query: 6.2s (threshold: 5s)
         """
         anomalies = []
         
         for operation, m in self.metrics.items():
+            # Skip if not enough samples
+            if m.count < min_samples:
+                continue
+            
             # Check error rate
             error_rate = m.failures / m.count if m.count > 0 else 0
             if error_rate > error_threshold:
                 anomalies.append(
                     f"⚠️  HIGH ERROR RATE in {operation}: "
-                    f"{error_rate*100:.1f}% (threshold: {error_threshold*100:.0f}%)"
+                    f"{error_rate*100:.1f}% (threshold: {error_threshold*100:.0f}%) "
+                    f"[{m.failures}/{m.count} failures]"
                 )
             
             # Check slow operations
@@ -207,7 +217,7 @@ class PerformanceMetrics:
                 )
             
             # Check high variance (inconsistent performance)
-            if m.count > 5 and m.std_dev > m.avg_time:
+            if m.count > 10 and m.std_dev > m.avg_time:
                 anomalies.append(
                     f"📊 HIGH VARIANCE in {operation}: "
                     f"std_dev={m.std_dev:.2f}s > avg={m.avg_time:.2f}s"

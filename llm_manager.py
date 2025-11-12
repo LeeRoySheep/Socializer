@@ -8,9 +8,30 @@ from typing import Optional, Dict, Any, Literal
 from dotenv import load_dotenv
 from langchain.chat_models import init_chat_model
 from langchain_openai import ChatOpenAI
-from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain_anthropic import ChatAnthropic
-from langchain_community.chat_models import ChatOllama
+
+# Optional imports - only if installed
+try:
+    from langchain_google_genai import ChatGoogleGenerativeAI
+    GEMINI_AVAILABLE = True
+except ImportError:
+    ChatGoogleGenerativeAI = None
+    GEMINI_AVAILABLE = False
+    print("⚠️  langchain_google_genai not installed - Gemini support disabled")
+
+try:
+    from langchain_anthropic import ChatAnthropic
+    CLAUDE_AVAILABLE = True
+except ImportError:
+    ChatAnthropic = None
+    CLAUDE_AVAILABLE = False
+    print("⚠️  langchain_anthropic not installed - Claude support disabled")
+
+try:
+    from langchain_community.chat_models import ChatOllama
+    OLLAMA_AVAILABLE = True
+except ImportError:
+    ChatOllama = None
+    OLLAMA_AVAILABLE = False
 
 load_dotenv()
 
@@ -112,15 +133,21 @@ class LLMManager:
             return LLMManager._get_openai_llm(model, temperature, max_tokens, api_key, **kwargs)
         
         elif provider == LLMProvider.GEMINI:
+            if not GEMINI_AVAILABLE:
+                raise ImportError("Gemini support not available. Install with: pip install langchain-google-genai")
             return LLMManager._get_gemini_llm(model, temperature, max_tokens, api_key, **kwargs)
         
         elif provider == LLMProvider.CLAUDE:
+            if not CLAUDE_AVAILABLE:
+                raise ImportError("Claude support not available. Install with: pip install langchain-anthropic")
             return LLMManager._get_claude_llm(model, temperature, max_tokens, api_key, **kwargs)
         
         elif provider == LLMProvider.LM_STUDIO:
             return LLMManager._get_lm_studio_llm(model, temperature, max_tokens, base_url, **kwargs)
         
         elif provider == LLMProvider.OLLAMA:
+            if not OLLAMA_AVAILABLE:
+                raise ImportError("Ollama support not available. Install with: pip install langchain-community")
             return LLMManager._get_ollama_llm(model, temperature, base_url, **kwargs)
         
         else:
