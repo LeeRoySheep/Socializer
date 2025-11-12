@@ -6,7 +6,7 @@ from contextlib import contextmanager
 # Import models from parent directory
 from datamanager.data_model import (
     User, Skill, Training, DataModel, UserSkill, UserPreference,
-    ChatRoom, RoomMember, RoomMessage, RoomInvite
+    ChatRoom, RoomMember, RoomMessage, RoomInvite, GeneralChatMessage
 )
 
 
@@ -381,6 +381,7 @@ class DataManager:
                     return None
 
                 # Extract content, role, and metadata from messages
+                # CRITICAL: Filter out internal system prompts that should NEVER be saved
                 serializable_messages = []
                 for msg in messages:
                     if hasattr(msg, "dict"):  # For Pydantic models
@@ -391,9 +392,24 @@ class DataManager:
                         print(f"Skipping invalid message format: {msg}")
                         continue  # Skip invalid message formats
                     
+                    content = str(msg_dict.get('content', ''))
+                    
+                    # SECURITY: Filter out internal monitoring/system prompts
+                    # These should NEVER be saved to user memory
+                    if any(phrase in content for phrase in [
+                        'CONVERSATION MONITORING REQUEST',
+                        'INSTRUCTIONS:',
+                        'Should you intervene',
+                        'NO_INTERVENTION_NEEDED',
+                        'You are monitoring this conversation',
+                        'Analyze if intervention is needed'
+                    ]):
+                        print(f"[SECURITY] Blocked internal system prompt from being saved to user memory")
+                        continue  # Skip this message - it's an internal prompt
+                    
                     # Keep content, role, and useful metadata
                     filtered_msg = {
-                        'content': str(msg_dict.get('content', '')),  # Ensure content is string
+                        'content': content,
                         'role': str(msg_dict.get('role', 'user'))  # Default to 'user' if role not specified
                     }
                     
@@ -1198,3 +1214,105 @@ class DataManager:
             except Exception as e:
                 print(f"Error getting pending invites: {e}")
                 return []
+    
+    def save_general_chat_message(self, sender_id: int, content: str) -> Optional[GeneralChatMessage]:
+        """
+        Save a message to the general chat history.
+        
+        Args:
+            sender_id: ID of the user sending the message
+            content: Message content
+            
+        Returns:
+            GeneralChatMessage object if successful, None otherwise
+        """
+        with self.get_session() as session:
+            try:
+                message = GeneralChatMessage(
+                    sender_id=sender_id,
+                    content=content,
+                    created_at=datetime.datetime.utcnow()
+                )
+                session.add(message)
+                session.commit()
+                
+                # Refresh to get the ID
+                session.refresh(message)
+                session.expunge(message)  # Detach from session
+                
+                return message
+            except Exception as e:
+                print(f"Error saving general chat message: {e}")
+                return None
+    
+    def get_general_chat_history(self, limit: int = 10) -> List[GeneralChatMessage]:
+        """
+        Get the last N messages from general chat.
+        
+        Args:
+            limit: Number of messages to retrieve (default: 10)
+            
+        Returns:
+            List of GeneralChatMessage objects
+        """
+        from sqlalchemy.orm import joinedload
+        
+        with self.get_session() as session:
+            try:
+                messages = (
+                    session.query(GeneralChatMessage)
+                    .options(joinedload(GeneralChatMessage.sender))  # Eagerly load sender
+                    .order_by(GeneralChatMessage.created_at.desc())
+                    .limit(limit)
+                    .all()
+                )
+                
+                # Reverse to get chronological order
+                messages = list(reversed(messages))
+                
+                # Detach from session and access sender to load it
+                for msg in messages:
+                    # Access sender while still in session to load it
+                    _ = msg.sender.username if msg.sender else "Unknown"
+                    session.expunge(msg)
+                
+                return messages
+            except Exception as e:
+                print(f"Error getting general chat history: {e}")
+                return []
+    
+    def cleanup_old_general_chat_messages(self, keep_last: int = 100) -> int:
+        """
+        Clean up old general chat messages, keeping only the last N.
+        
+        Args:
+            keep_last: Number of recent messages to keep (default: 100)
+            
+        Returns:
+            Number of messages deleted
+        """
+        with self.get_session() as session:
+            try:
+                # Get the ID of the Nth most recent message
+                cutoff_message = (
+                    session.query(GeneralChatMessage)
+                    .order_by(GeneralChatMessage.created_at.desc())
+                    .offset(keep_last)
+                    .first()
+                )
+                
+                if not cutoff_message:
+                    return 0  # Less than keep_last messages
+                
+                # Delete all messages older than the cutoff
+                deleted = (
+                    session.query(GeneralChatMessage)
+                    .filter(GeneralChatMessage.id < cutoff_message.id)
+                    .delete()
+                )
+                
+                session.commit()
+                return deleted
+            except Exception as e:
+                print(f"Error cleaning up general chat messages: {e}")
+                return 0

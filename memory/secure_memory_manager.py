@@ -204,6 +204,21 @@ class SecureMemoryManager:
             message: Message dictionary
             message_type: Type of message ('ai', 'general', 'chat')
         """
+        # SECURITY: Filter out internal monitoring/system prompts
+        # These should NEVER be saved to encrypted user memory
+        content = str(message.get('content', ''))
+        
+        if any(phrase in content for phrase in [
+            'CONVERSATION MONITORING REQUEST',
+            'INSTRUCTIONS:',
+            'Should you intervene',
+            'NO_INTERVENTION_NEEDED',
+            'You are monitoring this conversation',
+            'Analyze if intervention is needed'
+        ]):
+            print(f"[SECURITY] Blocked internal system prompt from encrypted memory for user {self._user.id}")
+            return  # Do NOT save this message
+        
         # Add to messages list
         self._current_memory["messages"].append(message)
         

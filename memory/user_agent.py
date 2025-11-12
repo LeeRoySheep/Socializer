@@ -105,15 +105,27 @@ class UserAgent:
         
         # Add buffer messages that aren't already in memory
         for msg in self._conversation_buffer:
-            if msg not in all_messages:
+            # Check for duplicates using content and timestamp
+            is_duplicate = any(
+                existing.get('content') == msg.get('content') and 
+                existing.get('timestamp') == msg.get('timestamp')
+                for existing in all_messages
+            )
+            if not is_duplicate:
                 all_messages.append(msg)
         
         # Determine message types and save
-        return self._memory_manager.save_combined_memory(
+        success = self._memory_manager.save_combined_memory(
             all_messages,
             max_general=10,  # Keep last 10 general chat messages
             max_ai=20        # Keep last 20 AI conversation messages
         )
+        
+        # Clear buffer after successful save
+        if success:
+            self._conversation_buffer.clear()
+        
+        return success
     
     def get_conversation_context(self, max_messages: int = 10) -> List[Dict]:
         """
@@ -132,11 +144,12 @@ class UserAgent:
         # Combine and deduplicate
         all_messages = stored_messages + self._conversation_buffer
         
-        # Remove duplicates while preserving order
+        # Remove duplicates while preserving order (include timestamp to avoid false duplicates)
         seen = set()
         unique_messages = []
         for msg in all_messages:
-            msg_key = f"{msg.get('role', '')}_{msg.get('content', '')}"
+            # Include timestamp in key to avoid filtering legitimate repeated messages
+            msg_key = f"{msg.get('role', '')}_{msg.get('content', '')}_{msg.get('timestamp', '')}"
             if msg_key not in seen:
                 seen.add(msg_key)
                 unique_messages.append(msg)

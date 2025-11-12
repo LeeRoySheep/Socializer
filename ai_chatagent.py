@@ -1926,21 +1926,21 @@ When user asks about:
                     self.memory_agent.add_to_memory({
                         "role": "user",
                         "content": getattr(msg, 'content', ''),
-                        "type": "ai"
+                        "type": "ai"  # This is correct - it's an AI conversation
                     })
                     break
                 elif isinstance(msg, dict) and msg.get('role') == 'user':
                     self.memory_agent.add_to_memory({
                         "role": "user",
                         "content": msg.get('content', ''),
-                        "type": "ai"
+                        "type": "ai"  # This is correct - it's an AI conversation
                     })
                     break
                 elif hasattr(msg, '__class__') and msg.__class__.__name__ == 'HumanMessage':
                     self.memory_agent.add_to_memory({
                         "role": "user",
                         "content": msg.content,
-                        "type": "ai"
+                        "type": "ai"  # This is correct - it's an AI conversation
                     })
                     break
             
@@ -1960,10 +1960,10 @@ When user asks about:
                             "type": "ai"
                         })
             
-            # Auto-save every 3 messages
-            if len(self.memory_agent._conversation_buffer) >= 3:
-                self.memory_agent.save_memory()
-                print("💾 Conversation saved to encrypted memory")
+            # Save immediately after adding both user and AI messages
+            # This ensures messages are persisted right away
+            self.memory_agent.save_memory()
+            print("💾 Conversation saved to encrypted memory")
                 
         except Exception as e:
             print(f"⚠️ Error saving to memory: {e}")

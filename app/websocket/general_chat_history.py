@@ -4,11 +4,13 @@ General Chat History Manager
 Maintains the last 10 messages from the general chat room
 that are visible to all users when they join.
 
+Now with database persistence to survive server restarts.
+
 Author: Socializer Development Team
 Date: 2024-11-12
 """
 
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from datetime import datetime
 from collections import deque
 import json
@@ -33,11 +35,21 @@ class GeneralChatHistory:
         if not self._initialized:
             # Use deque for efficient FIFO with max size
             self._history = deque(maxlen=10)  # Automatically keeps only last 10
+            self._data_manager = None  # Will be set by set_data_manager
             self._initialized = True
+    
+    def set_data_manager(self, data_manager) -> None:
+        """
+        Set the DataManager instance for database persistence.
+        
+        Args:
+            data_manager: DataManager instance
+        """
+        self._data_manager = data_manager
     
     def add_message(self, message: Dict[str, Any]) -> None:
         """
-        Add a message to the history.
+        Add a message to the history and persist to database.
         
         Args:
             message: Message dictionary containing:
@@ -52,6 +64,18 @@ class GeneralChatHistory:
         
         # Add to history (oldest will be automatically removed if > 10)
         self._history.append(message)
+        
+        # Persist to database for restart recovery
+        if self._data_manager:
+            try:
+                # Save to database
+                self._data_manager.save_general_chat_message(
+                    sender_id=int(message['user_id']),
+                    content=message['content']
+                )
+            except Exception as e:
+                print(f"[WARNING] Failed to persist general chat message to database: {e}")
+                # Continue anyway - in-memory history still works
     
     def get_history(self, include_system: bool = False) -> List[Dict[str, Any]]:
         """
@@ -86,21 +110,33 @@ class GeneralChatHistory:
         """
         return json.dumps(self.get_history())
     
-    def load_from_database(self, messages: List[Any]) -> None:
+    def load_from_database(self, messages: List[Any] = None) -> None:
         """
         Load initial history from database messages.
         
         Args:
-            messages: List of message objects from database
+            messages: Optional list of message objects. If None, will load from database using data_manager
         """
         self.clear()
+        
+        # If no messages provided, load from database
+        if messages is None and self._data_manager:
+            try:
+                messages = self._data_manager.get_general_chat_history(limit=10)
+                print(f"[INFO] Loaded {len(messages)} messages from database for general chat history")
+            except Exception as e:
+                print(f"[WARNING] Failed to load general chat history from database: {e}")
+                return
+        
+        if not messages:
+            return
         
         for msg in messages[-10:]:  # Take only last 10
             # Convert database message to our format
             message_dict = {
                 'content': getattr(msg, 'content', ''),
-                'timestamp': getattr(msg, 'timestamp', datetime.utcnow()).isoformat() if hasattr(msg, 'timestamp') else datetime.utcnow().isoformat(),
-                'user_id': getattr(msg, 'user_id', None) or getattr(msg, 'sender_id', None),
+                'timestamp': getattr(msg, 'created_at', datetime.utcnow()).isoformat() if hasattr(msg, 'created_at') else datetime.utcnow().isoformat(),
+                'user_id': str(getattr(msg, 'sender_id', '')),
                 'username': getattr(msg, 'username', 'Unknown'),
                 'type': 'history'  # Mark as historical message
             }

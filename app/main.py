@@ -273,42 +273,33 @@ app.mount("/static", StaticFiles(directory=static_dir), name="static")
 async def startup_event():
     """Initialize services on startup."""
     from app.websocket.general_chat_history import get_general_chat_history
-    from datetime import datetime, timedelta
+    from datamanager.data_manager import DataManager
     
-    # Initialize chat history with welcome messages
+    logger.info("[STARTUP] Initializing general chat history...")
+    
+    # Get the general chat history singleton
     history = get_general_chat_history()
     
-    if len(history) == 0:
-        logger.info("[STARTUP] Initializing general chat history with welcome messages")
+    # Set up database connection for persistence
+    try:
+        dm = DataManager("data.sqlite.db")
+        history.set_data_manager(dm)
+        logger.info("[STARTUP] DataManager connected to general chat history")
         
-        base_time = datetime.utcnow() - timedelta(minutes=30)
+        # Load existing messages from database
+        history.load_from_database()
+        logger.info(f"[STARTUP] Loaded {len(history)} messages from database")
         
-        # Add some initial user messages (no system/AI messages)
-        initial_messages = [
-            ("Alice", "Good morning everyone! 👋", "user_1"),
-            ("Bob", "Hey Alice! How's it going?", "user_2"),
-            ("Alice", "Great! Just started working on my project", "user_1"),
-            ("Charlie", "Morning folks! What project are you working on Alice?", "user_3"),
-            ("Alice", "Building a web app with FastAPI", "user_1"),
-            ("Bob", "Nice! I'm using FastAPI too, it's awesome", "user_2"),
-            ("Charlie", "The async support is really good", "user_3"),
-            ("David", "Hey everyone! Just joined 😊", "user_4"),
-            ("Alice", "Welcome David!", "user_1"),
-            ("Bob", "Hi David! We're talking about FastAPI", "user_2"),
-        ]
-        
-        for i, (username, content, user_id) in enumerate(initial_messages):
-            msg_time = base_time + timedelta(minutes=i*5)
-            history.add_message({
-                "username": username,
-                "content": content,
-                "user_id": user_id,
-                "timestamp": msg_time.isoformat()
-            })
-        
-        logger.info(f"[STARTUP] Chat history initialized with {len(history)} messages")
-    else:
-        logger.info(f"[STARTUP] Chat history already has {len(history)} messages")
+        # Clean up old messages (keep last 100 in database)
+        deleted = dm.cleanup_old_general_chat_messages(keep_last=100)
+        if deleted > 0:
+            logger.info(f"[STARTUP] Cleaned up {deleted} old general chat messages")
+            
+    except Exception as e:
+        logger.error(f"[STARTUP] Error initializing general chat history: {e}")
+        # Continue without database persistence
+    
+    logger.info(f"[STARTUP] General chat history ready with {len(history)} messages")
 
 # Templates with absolute path
 templates_dir = os.path.join(BASE_DIR, 'templates')
@@ -970,25 +961,34 @@ async def websocket_endpoint(
                             else:
                                 logger.warning(f"Message save returned None: room_id={numeric_room_id}")
                     
-                        # Also save to encrypted memory
+                        # Also save to ENCRYPTED memory - CRITICAL for privacy
                         try:
                             memory_manager = SecureMemoryManager(dm, user)
+                            
+                            # Add message with proper structure for recall
                             memory_manager.add_message({
+                                "role": "user",  # Important for conversation recall
                                 "type": "general",
                                 "sender": user.username,
                                 "content": content,
                                 "room_id": room_id,
                                 "timestamp": datetime.utcnow().isoformat()
                             }, message_type="general")
-                            # Auto-save periodically
-                            if len(memory_manager._current_memory.get("messages", [])) % 5 == 0:
-                                memory_manager.save_combined_memory(
-                                    memory_manager._current_memory.get("messages", []),
-                                    max_general=10,
-                                    max_ai=20
-                                )
+                            
+                            # Save IMMEDIATELY to encrypted storage (don't wait)
+                            success = memory_manager.save_combined_memory(
+                                memory_manager._current_memory.get("messages", []),
+                                max_general=10,
+                                max_ai=20
+                            )
+                            
+                            if success:
+                                logger.debug(f"Chat message encrypted and saved for user {user.id}")
+                            else:
+                                logger.warning(f"Failed to save encrypted chat for user {user.id}")
+                                
                         except Exception as mem_e:
-                            logger.debug(f"Memory save error: {mem_e}")
+                            logger.error(f"Encrypted memory save error: {mem_e}")
 
                     except Exception as e:
                         logger.error(f"Failed to save message to database: {e}")

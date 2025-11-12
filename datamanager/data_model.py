@@ -405,6 +405,27 @@ class RoomMessage(Base):
         return f"<RoomMessage(id={self.id}, room_id={self.room_id}, sender_type={self.sender_type})>"
 
 
+class GeneralChatMessage(Base):
+    """
+    Messages sent in the general chat room.
+    Persisted to maintain chat history across server restarts.
+    """
+    __tablename__ = "general_chat_messages"
+    
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    sender_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime, default=datetime.datetime.utcnow, nullable=False, index=True
+    )
+    
+    # Relationships
+    sender: Mapped["User"] = relationship("User", foreign_keys=[sender_id])
+    
+    def __repr__(self) -> str:
+        return f"<GeneralChatMessage(id={self.id}, sender_id={self.sender_id})>"
+
+
 class RoomInvite(Base):
     """
     Invitations to join private chat rooms.
