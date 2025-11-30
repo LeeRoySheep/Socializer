@@ -464,7 +464,7 @@ class TrainingPlanManager:
             memory_manager = SecureMemoryManager(self.dm, user)
             
             # Load from memory system (already encrypted)
-            memory_data = memory_manager.load_memory(user)
+            memory_data = memory_manager.get_current_memory()
             
             if memory_data and "training_plan" in memory_data:
                 return memory_data["training_plan"]
@@ -487,14 +487,19 @@ class TrainingPlanManager:
             # Create SecureMemoryManager for this user
             memory_manager = SecureMemoryManager(self.dm, user)
             
-            # Load existing memory
-            memory_data = memory_manager.load_memory(user) or {}
+            # Get current memory structure
+            current_memory = memory_manager._current_memory
             
             # Update training plan section
-            memory_data["training_plan"] = training_data
+            current_memory["training_plan"] = training_data
             
-            # Save encrypted
-            memory_manager.save_memory(user, memory_data)
+            # Update metadata
+            from datetime import datetime
+            current_memory["metadata"]["last_updated"] = datetime.now().isoformat()
+            
+            # Encrypt and save to database
+            encrypted = memory_manager._encryptor.encrypt_memory(current_memory)
+            self.dm.update_user_memory(user.id, encrypted)
             
             logger.logger.debug(f"✅ Encrypted training data saved for user {user.id}")
             
