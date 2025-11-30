@@ -53,6 +53,12 @@ from app.auth import get_token_manager
 # Password hashing
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
+# OAuth2 scheme for Swagger UI authorization
+oauth2_scheme = OAuth2PasswordBearer(
+    tokenUrl="/token",  # This points to the login endpoint
+    auto_error=False  # Don't auto-raise errors, let endpoints handle it
+)
+
 # Token blacklist to store invalidated tokens
 TOKEN_BLACKLIST = set()
 
@@ -157,9 +163,14 @@ async def get_current_user_websocket(token: str, db: Session) -> Optional[User]:
 
 async def get_current_active_user(
     request: Request, 
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    token: str = Depends(oauth2_scheme)  # This makes Swagger show the Authorize button
 ) -> User:
-    """Get the current active user from the JWT token in cookies."""
+    """Get the current active user from the JWT token in cookies or Authorization header.
+    
+    For Swagger UI: Click 'Authorize' button, login via /token endpoint, then the token
+    will be automatically included in all requests.
+    """
     current_user = get_current_user(request, db)
     if not current_user:
         raise HTTPException(
@@ -192,6 +203,7 @@ ai_manager = AIAgentManager()
 app = FastAPI(
     title="Socializer API",
     version="0.1.0",
+    description="Socializer API with JWT authentication. Click 'Authorize' and use /token endpoint to login.",
     docs_url="/docs",
     redoc_url="/redoc"
 )
