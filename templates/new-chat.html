@@ -1177,6 +1177,10 @@
                         <input type="text" id="message-input" placeholder="Type your message... (use /ai for AI assistant)" autocomplete="off">
                     </div>
                     <div class="send-controls">
+                        <button type="button" id="llm-config-toggle" class="ai-toggle" title="Configure Local LLM" data-bs-toggle="modal" data-bs-target="#llmConfigModal">
+                            <i class="bi bi-cpu"></i>
+                            <span class="ai-toggle-text">LLM</span>
+                        </button>
                         <button type="button" id="ai-toggle" class="ai-toggle" title="Toggle AI Passive Listening">
                             <i class="bi bi-robot"></i>
                             <span class="ai-toggle-text">AI Off</span>
@@ -1283,6 +1287,113 @@
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
                     <button type="button" class="btn btn-primary" id="create-room-btn">
                         <i class="bi bi-plus-lg"></i> Create Room
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- LLM Configuration Modal -->
+    <div class="modal fade" id="llmConfigModal" tabindex="-1" aria-labelledby="llmConfigModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="llmConfigModalLabel">
+                        <i class="bi bi-cpu"></i> Local LLM Configuration
+                    </h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="alert alert-info">
+                        <i class="bi bi-info-circle"></i>
+                        <strong>Configure your local LLM server</strong><br>
+                        <small>Enter the IP address and port of your local LLM server (LM Studio, Ollama, etc.)</small>
+                    </div>
+                    
+                    <form id="llm-config-form">
+                        <!-- Provider Selection -->
+                        <div class="mb-3">
+                            <label for="llm-provider" class="form-label">
+                                <i class="bi bi-server"></i> Provider
+                            </label>
+                            <select class="form-select" id="llm-provider" required>
+                                <option value="">Select provider...</option>
+                                <option value="lm_studio">LM Studio (local)</option>
+                                <option value="ollama">Ollama (local)</option>
+                                <option value="openai">OpenAI (cloud)</option>
+                                <option value="gemini">Google Gemini (cloud)</option>
+                                <option value="claude">Anthropic Claude (cloud)</option>
+                            </select>
+                            <div class="form-text">Choose your LLM provider</div>
+                        </div>
+
+                        <!-- IP Address -->
+                        <div class="mb-3">
+                            <label for="llm-ip" class="form-label">
+                                <i class="bi bi-hdd-network"></i> IP Address
+                            </label>
+                            <input 
+                                type="text" 
+                                class="form-control" 
+                                id="llm-ip" 
+                                placeholder="192.168.1.100 or localhost"
+                                required
+                            >
+                            <div class="form-text">Enter server IP or hostname</div>
+                        </div>
+
+                        <!-- Port -->
+                        <div class="mb-3">
+                            <label for="llm-port" class="form-label">
+                                <i class="bi bi-ethernet"></i> Port
+                            </label>
+                            <input 
+                                type="number" 
+                                class="form-control" 
+                                id="llm-port" 
+                                placeholder="1234"
+                                min="1"
+                                max="65535"
+                                required
+                            >
+                            <div class="form-text">Default: LM Studio (1234), Ollama (11434)</div>
+                        </div>
+
+                        <!-- Model Name -->
+                        <div class="mb-3">
+                            <label for="llm-model" class="form-label">
+                                <i class="bi bi-box"></i> Model Name
+                            </label>
+                            <input 
+                                type="text" 
+                                class="form-control" 
+                                id="llm-model" 
+                                placeholder="llama-3.2 or local-model"
+                            >
+                            <div class="form-text">Model identifier (optional for some providers)</div>
+                        </div>
+
+                        <!-- Preview -->
+                        <div class="mb-3">
+                            <label class="form-label">
+                                <i class="bi bi-link-45deg"></i> Endpoint Preview
+                            </label>
+                            <div class="alert alert-secondary mb-0">
+                                <code id="endpoint-preview">http://localhost:1234</code>
+                            </div>
+                        </div>
+
+                        <!-- Status Message -->
+                        <div id="llm-config-status" class="alert" style="display: none;"></div>
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline-danger" id="clear-llm-config-btn">
+                        <i class="bi bi-trash"></i> Clear Config
+                    </button>
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="button" class="btn btn-primary" id="save-llm-config-btn">
+                        <i class="bi bi-check-lg"></i> Save Configuration
                     </button>
                 </div>
             </div>

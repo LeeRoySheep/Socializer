@@ -85,113 +85,6 @@ def client(db_session):
         yield test_client
     app.dependency_overrides.clear()
 
-@pytest.fixture
-def test_user(db_session):
-    """Create a test user in the database."""
-    from datamanager.data_model import User
-    
-    # Create test user with all required fields
-    user = User(
-        username=TEST_USER_USERNAME,
-        hashed_password=pwd_context.hash(TEST_USER_PASSWORD),
-        hashed_email=TEST_USER_EMAIL,
-        role="user",
-        temperature=0.7,
-        preferences={},
-        member_since=datetime.date.today(),
-        messages=0
-    )
-    db_session.add(user)
-    db_session.commit()
-    db_session.refresh(user)
-    
-    return user
-
-@pytest.fixture
-def auth_token(test_user):
-    """Generate an access token for the test user."""
-    from datetime import datetime, timedelta
-    from jose import jwt
-    
-    access_token_expires = timedelta(minutes=30)
-    expire = datetime.utcnow() + access_token_expires
-    
-    to_encode = {
-        "sub": test_user.username,
-        "exp": expire,
-    }
-    
-    encoded_jwt = jwt.encode(
-        to_encode, 
-        os.getenv("SECRET_KEY"), 
-        algorithm=os.getenv("ALGORITHM")
-    )
-    
-    return encoded_jwt
-    """Create a test user in the database."""
-    # Delete any existing test users
-    db_session.query(User).filter(User.username == TEST_USER_USERNAME).delete()
-    db_session.commit()
-    
-    # Hash the password
-    pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-    hashed_password = pwd_context.hash(TEST_USER_PASSWORD)
-    
-    # Create test user
-    user = User(
-        username=TEST_USER_USERNAME,
-        email=TEST_USER_EMAIL,
-        hashed_password=hashed_password,
-        is_active=True
-    )
-    
-    db_session.add(user)
-    db_session.commit()
-    db_session.refresh(user)
-    
-    return {
-        "username": user.username,
-        "email": user.email,
-        "password": TEST_USER_PASSWORD,
-        "id": user.id
-    }
-
-# Authentication token fixture
-@pytest.fixture
-def auth_token(test_user) -> str:
-    """Generate an access token for the test user."""
-    # Create token data
-    access_token_expires = timedelta(minutes=30)
-    to_encode = {
-        "sub": test_user.username,
-        "exp": datetime.utcnow() + access_token_expires
-    }
-    
-    # Create token
-    secret_key = os.getenv("SECRET_KEY")
-    algorithm = os.getenv("ALGORITHM", "HS256")
-    token = jwt.encode(to_encode, secret_key, algorithm=algorithm)
-    
-    return token
-
-# Dependency override for the database session
-@pytest.fixture
-def override_get_db():
-    db = TestingSessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
-
-# Override the app's dependency
-app.dependency_overrides[get_db] = override_get_db
-
-# Test client with overridden dependencies
-@pytest.fixture
-def test_client():
-    """Create a test client for the FastAPI application."""
-    with TestClient(app) as client:
-        yield client
 @pytest.fixture(scope="function")
 def test_session() -> Generator[Session, None, None]:
     """Create a test database session with a savepoint, and roll back after the test.
@@ -267,3 +160,18 @@ def test_user(test_session: Session) -> User:
     test_session.commit()
     test_session.refresh(user)
     return user
+
+@pytest.fixture
+def auth_token(test_user: User) -> str:
+    """Generate an access token for the test user."""
+    access_token_expires = timedelta(minutes=30)
+    to_encode = {
+        "sub": test_user.username,
+        "exp": datetime.utcnow() + access_token_expires
+    }
+    
+    secret_key = os.getenv("SECRET_KEY")
+    algorithm = os.getenv("ALGORITHM", "HS256")
+    token = jwt.encode(to_encode, secret_key, algorithm=algorithm)
+    
+    return token

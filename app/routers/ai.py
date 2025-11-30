@@ -14,6 +14,11 @@ from app.database import get_db
 from datamanager.data_model import User
 from ai_chatagent import AiChatagent, llm, dm
 from app.ote_logger import get_logger
+from app.schemas import LLMConfigCreate, LLMConfigResponse
+from training import TrainingPlanManager
+
+# Initialize training manager
+training_manager = TrainingPlanManager(dm)
 
 router = APIRouter(
     prefix="/api/ai",
@@ -167,6 +172,85 @@ class MetricsSummaryResponse(BaseModel):
 
 # ==================== API Endpoints ====================
 
+@router.get(
+    "/training/login-reminder",
+    summary="Get Training Reminder (Login Message)",
+    description="Get personalized training reminders for user on login. Shows active training plans and progress.",
+    responses={
+        200: {"description": "Training reminder message"},
+        401: {"description": "Not authenticated"}
+    }
+)
+async def get_training_reminder(
+    current_user: User = Depends(get_current_user)
+) -> Dict[str, str]:
+    """
+    Get personalized training reminder for user login.
+    
+    Returns a friendly welcome message with:
+    - Active training plans
+    - Current progress levels
+    - Next milestones
+    
+    Example:
+        GET /api/ai/training/login-reminder
+        
+        Response:
+        {
+            "message": "Welcome back, John! 🎯\\n\\nYour Active Trainings:\\n• Empathy: Level 3/10..."
+        }
+    """
+    try:
+        reminder = training_manager.get_login_reminder(current_user)
+        return {"message": reminder}
+    except Exception as e:
+        ote_logger.logger.error(f"Error getting training reminder: {e}", exc_info=True)
+        return {"message": f"Welcome back, {current_user.username}! 👋"}
+
+
+@router.post(
+    "/training/logout",
+    summary="Save Training Progress (Logout)",
+    description="Save all training progress data when user logs out. Ensures all progress is encrypted and persisted.",
+    responses={
+        200: {"description": "Progress saved successfully"},
+        401: {"description": "Not authenticated"}
+    }
+)
+async def save_training_on_logout(
+    current_user: User = Depends(get_current_user)
+) -> Dict[str, str]:
+    """
+    Save all training progress when user logs out.
+    
+    This endpoint:
+    - Saves all training progress to encrypted storage
+    - Updates database with latest skill levels
+    - Ensures data persistence
+    
+    Example:
+        POST /api/ai/training/logout
+        
+        Response:
+        {
+            "status": "success",
+            "message": "Training progress saved"
+        }
+    """
+    try:
+        training_manager.save_logout_progress(current_user)
+        return {
+            "status": "success",
+            "message": "Training progress saved"
+        }
+    except Exception as e:
+        ote_logger.logger.error(f"Error saving logout progress: {e}", exc_info=True)
+        return {
+            "status": "error",
+            "message": f"Could not save progress: {str(e)}"
+        }
+
+
 @router.post(
     "/chat",
     response_model=ChatResponse,
@@ -206,14 +290,65 @@ async def chat_with_ai(
         from llm_manager import LLMManager
         selected_model = request.model or "gpt-4o-mini"
         
-        # Determine provider and handle local models
-        if "lm-studio" in selected_model.lower():
+        # Query user fresh from the current session to avoid session conflicts
+        user = db.query(User).filter(User.id == current_user.id).first()
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="User not found"
+            )
+        
+        # Determine if we should use custom config based on selected model
+        # Custom config is only used if the selected model matches the saved provider
+        use_custom_config = False
+        if user.llm_provider and user.llm_endpoint:
+            # Check if selected model matches the saved provider
+            if (user.llm_provider == "lm_studio" and "lm-studio" in selected_model.lower()) or \
+               (user.llm_provider == "ollama" and "ollama" in selected_model.lower()) or \
+               (user.llm_provider in ["openai", "claude", "gemini"] and user.llm_provider in selected_model.lower()):
+                use_custom_config = True
+        
+        # Use custom LLM configuration if matching provider is selected
+        if use_custom_config:
+            provider = user.llm_provider
+            endpoint = user.llm_endpoint
+            model_name = user.llm_model or "local-model"
+            
+            # Ensure endpoint has /v1 suffix for OpenAI-compatible APIs (LM Studio, Ollama)
+            if provider in ['lm_studio', 'ollama']:
+                if not endpoint.endswith('/v1'):
+                    endpoint = endpoint.rstrip('/') + '/v1'
+            
+            ote_logger.logger.info(
+                f"Using custom LLM config for user {user.id}: "
+                f"provider={provider}, endpoint={endpoint}, model={model_name}"
+            )
+            
+            # Initialize LLM with custom endpoint
+            if provider in ['lm_studio', 'ollama']:
+                # For local models, use base_url parameter
+                model_llm = LLMManager.get_llm(
+                    provider=provider,
+                    model=model_name,
+                    temperature=user.temperature or 0.7,
+                    base_url=endpoint
+                )
+            else:
+                # For cloud providers (unlikely to have custom endpoint, but support it)
+                model_llm = LLMManager.get_llm(
+                    provider=provider,
+                    model=model_name,
+                    temperature=user.temperature or 0.7
+                )
+        
+        # Use default LLM configuration based on selected model
+        elif "lm-studio" in selected_model.lower():
             provider = "lm_studio"
             # LM Studio default endpoint
             model_llm = LLMManager.get_llm(
                 provider=provider,
                 model="local-model",  # LM Studio auto-detects
-                temperature=current_user.temperature or 0.7,
+                temperature=user.temperature or 0.7,
                 base_url="http://localhost:1234/v1"  # Default LM Studio port
             )
         elif "ollama" in selected_model.lower():
@@ -222,7 +357,7 @@ async def chat_with_ai(
             model_llm = LLMManager.get_llm(
                 provider=provider,
                 model="llama2",  # Default Ollama model
-                temperature=current_user.temperature or 0.7,
+                temperature=user.temperature or 0.7,
                 base_url="http://localhost:11434"  # Default Ollama port
             )
         elif "claude" in selected_model.lower():
@@ -230,25 +365,25 @@ async def chat_with_ai(
             model_llm = LLMManager.get_llm(
                 provider=provider,
                 model=selected_model,
-                temperature=current_user.temperature or 0.7
+                temperature=user.temperature or 0.7
             )
         elif "gemini" in selected_model.lower():
             provider = "gemini"
             model_llm = LLMManager.get_llm(
                 provider=provider,
                 model=selected_model,
-                temperature=current_user.temperature or 0.7
+                temperature=user.temperature or 0.7
             )
         else:
             provider = "openai"
             model_llm = LLMManager.get_llm(
                 provider=provider,
                 model=selected_model,
-                temperature=current_user.temperature or 0.7
+                temperature=user.temperature or 0.7
             )
         
         # Create AI agent for this user with selected model
-        agent = AiChatagent(current_user, model_llm)
+        agent = AiChatagent(user, model_llm)
         
         # Generate request ID for tracing
         request_id = ote_logger.generate_request_id()
@@ -257,7 +392,7 @@ async def chat_with_ai(
         graph = agent.build_graph()
         config = {
             "configurable": {
-                "thread_id": request.conversation_id or f"user_{current_user.id}"
+                "thread_id": request.conversation_id or f"user_{user.id}"
             }
         }
         
@@ -544,4 +679,181 @@ async def list_tools(current_user: User = Depends(get_current_user)):
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error listing tools: {str(e)}"
+        )
+
+
+# ==================== LLM Configuration Endpoints ====================
+
+@router.get(
+    "/llm-config",
+    response_model=LLMConfigResponse,
+    summary="Get User's LLM Configuration",
+    description="Retrieve the current user's custom LLM configuration (provider, endpoint, model)",
+)
+async def get_llm_config(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Get the authenticated user's LLM configuration.
+    
+    Returns the user's configured LLM provider, custom endpoint (IP:port), 
+    and model name. If no configuration is set, returns None values.
+    
+    **Example Response:**
+    ```json
+    {
+        "user_id": 1,
+        "provider": "lm_studio",
+        "endpoint": "http://192.168.1.100:1234",
+        "model": "llama-3.2"
+    }
+    ```
+    """
+    try:
+        return LLMConfigResponse(
+            user_id=current_user.id,
+            provider=current_user.llm_provider,
+            endpoint=current_user.llm_endpoint,
+            model=current_user.llm_model
+        )
+    except Exception as e:
+        ote_logger.logger.error(f"Error retrieving LLM config: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error retrieving LLM configuration: {str(e)}"
+        )
+
+
+@router.post(
+    "/llm-config",
+    response_model=LLMConfigResponse,
+    summary="Update User's LLM Configuration",
+    description="Set or update the user's custom LLM configuration with IP, port, and provider",
+)
+async def update_llm_config(
+    config: LLMConfigCreate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Update the authenticated user's LLM configuration.
+    
+    Allows users to configure a custom local LLM endpoint by providing:
+    - **provider**: LLM provider (e.g., 'lm_studio', 'ollama', 'openai')
+    - **endpoint**: Full URL with IP and port (e.g., 'http://192.168.1.100:1234')
+    - **model**: Model name (e.g., 'llama-3.2', 'local-model')
+    
+    All fields are optional. Providing None will clear the configuration.
+    
+    **Example Request:**
+    ```json
+    {
+        "provider": "lm_studio",
+        "endpoint": "http://192.168.1.100:1234",
+        "model": "llama-3.2"
+    }
+    ```
+    
+    **Validation:**
+    - Endpoint must start with http:// or https://
+    - Endpoint must include a port number
+    - Provider must be one of: lm_studio, ollama, openai, gemini, claude
+    """
+    try:
+        # Query the user fresh from the current session to avoid session conflicts
+        user = db.query(User).filter(User.id == current_user.id).first()
+        
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="User not found"
+            )
+        
+        # Update user's LLM configuration in the database
+        user.llm_provider = config.provider
+        user.llm_endpoint = config.endpoint
+        user.llm_model = config.model
+        
+        db.commit()
+        db.refresh(user)
+        
+        ote_logger.logger.info(
+            f"LLM config updated for user {user.id}: "
+            f"provider={config.provider}, endpoint={config.endpoint}, model={config.model}"
+        )
+        
+        return LLMConfigResponse(
+            user_id=user.id,
+            provider=user.llm_provider,
+            endpoint=user.llm_endpoint,
+            model=user.llm_model
+        )
+    except HTTPException:
+        # Re-raise HTTP exceptions as-is
+        raise
+    except Exception as e:
+        db.rollback()
+        ote_logger.logger.error(f"Error updating LLM config: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error updating LLM configuration: {str(e)}"
+        )
+
+
+@router.delete(
+    "/llm-config",
+    summary="Clear User's LLM Configuration",
+    description="Remove the user's custom LLM configuration and revert to system defaults",
+)
+async def delete_llm_config(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Clear the authenticated user's LLM configuration.
+    
+    Removes all custom LLM settings and reverts the user to system default configuration.
+    This will clear:
+    - Provider setting
+    - Custom endpoint (IP:port)
+    - Model name
+    
+    **Example Response:**
+    ```json
+    {
+        "status": "success",
+        "message": "LLM configuration cleared successfully"
+    }
+    ```
+    """
+    try:
+        # Query the user fresh from the current session to avoid session conflicts
+        user = db.query(User).filter(User.id == current_user.id).first()
+        
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="User not found"
+            )
+        
+        # Clear user's LLM configuration
+        user.llm_provider = None
+        user.llm_endpoint = None
+        user.llm_model = None
+        
+        db.commit()
+        
+        ote_logger.logger.info(f"LLM config cleared for user {user.id}")
+        
+        return {
+            "status": "success",
+            "message": "LLM configuration cleared successfully"
+        }
+    except Exception as e:
+        db.rollback()
+        ote_logger.logger.error(f"Error clearing LLM config: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error clearing LLM configuration: {str(e)}"
         )

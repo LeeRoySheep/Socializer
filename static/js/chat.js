@@ -1935,6 +1935,363 @@ window.testMessageHistory = function(roomId) {
 console.log('💡 TIP: Test message history manually with: testMessageHistory(26)');
 
 
+// ==================== LLM Configuration Management ====================
+
+/**
+ * LLMConfigManager - Manages Local LLM Configuration
+ * 
+ * Handles CRUD operations for user's custom LLM settings including
+ * provider selection, endpoint configuration (IP/port), and model name.
+ * Follows OOP principles with clear separation of concerns.
+ */
+class LLMConfigManager {
+    /**
+     * Initialize the LLM configuration manager
+     */
+    constructor() {
+        this.apiBaseUrl = '/api/ai/llm-config';
+        this.modal = null;
+        this.form = null;
+        this.initialized = false;
+    }
+
+    /**
+     * Initialize event listeners and load current configuration
+     */
+    async initialize() {
+        if (this.initialized) return;
+        
+        console.log('[LLM Config] Initializing LLM configuration manager');
+        
+        // Get modal and form elements
+        this.modal = document.getElementById('llmConfigModal');
+        this.form = document.getElementById('llm-config-form');
+        
+        if (!this.modal || !this.form) {
+            console.warn('[LLM Config] Modal or form not found');
+            return;
+        }
+
+        // Setup event listeners
+        this._setupEventListeners();
+        
+        // Load current configuration when modal is opened
+        this.modal.addEventListener('show.bs.modal', () => {
+            this.loadConfiguration();
+        });
+        
+        this.initialized = true;
+        console.log('[LLM Config] Initialization complete');
+    }
+
+    /**
+     * Setup event listeners for form interactions
+     * @private
+     */
+    _setupEventListeners() {
+        const saveBtn = document.getElementById('save-llm-config-btn');
+        const clearBtn = document.getElementById('clear-llm-config-btn');
+        const ipInput = document.getElementById('llm-ip');
+        const portInput = document.getElementById('llm-port');
+        const providerSelect = document.getElementById('llm-provider');
+
+        // Save configuration
+        if (saveBtn) {
+            saveBtn.addEventListener('click', () => this.saveConfiguration());
+        }
+
+        // Clear configuration
+        if (clearBtn) {
+            clearBtn.addEventListener('click', () => this.clearConfiguration());
+        }
+
+        // Update endpoint preview when inputs change
+        const updatePreview = () => this._updateEndpointPreview();
+        if (ipInput) ipInput.addEventListener('input', updatePreview);
+        if (portInput) portInput.addEventListener('input', updatePreview);
+
+        // Update port placeholder based on provider selection
+        if (providerSelect) {
+            providerSelect.addEventListener('change', (e) => {
+                this._updateProviderDefaults(e.target.value);
+            });
+        }
+    }
+
+    /**
+     * Update endpoint preview display
+     * @private
+     */
+    _updateEndpointPreview() {
+        const ip = document.getElementById('llm-ip')?.value || 'localhost';
+        const port = document.getElementById('llm-port')?.value || '1234';
+        const preview = document.getElementById('endpoint-preview');
+        
+        if (preview) {
+            preview.textContent = `http://${ip}:${port}`;
+        }
+    }
+
+    /**
+     * Update default values based on selected provider
+     * @private
+     * @param {string} provider - Selected provider name
+     */
+    _updateProviderDefaults(provider) {
+        const portInput = document.getElementById('llm-port');
+        const modelInput = document.getElementById('llm-model');
+        
+        // Set default ports and model hints based on provider
+        const defaults = {
+            'lm_studio': { port: '1234', model: 'local-model' },
+            'ollama': { port: '11434', model: 'llama3.2' },
+            'openai': { port: '443', model: 'gpt-4o-mini' },
+            'gemini': { port: '443', model: 'gemini-2.0-flash-exp' },
+            'claude': { port: '443', model: 'claude-sonnet-4-0' }
+        };
+
+        const config = defaults[provider];
+        if (config) {
+            if (portInput) portInput.placeholder = config.port;
+            if (modelInput) modelInput.placeholder = config.model;
+        }
+
+        this._updateEndpointPreview();
+    }
+
+    /**
+     * Load current LLM configuration from server
+     * @returns {Promise<void>}
+     */
+    async loadConfiguration() {
+        try {
+            console.log('[LLM Config] Loading configuration...');
+            this._showStatus('Loading configuration...', 'info');
+
+            const response = await this._makeAuthenticatedRequest('GET', this.apiBaseUrl);
+            
+            if (response.ok) {
+                const config = await response.json();
+                console.log('[LLM Config] Configuration loaded:', config);
+                
+                // Populate form with loaded configuration
+                this._populateForm(config);
+                this._showStatus('Configuration loaded successfully', 'success', 2000);
+            } else {
+                throw new Error(`Failed to load configuration: ${response.status}`);
+            }
+        } catch (error) {
+            console.error('[LLM Config] Error loading configuration:', error);
+            this._showStatus('Failed to load configuration', 'danger');
+        }
+    }
+
+    /**
+     * Save LLM configuration to server
+     * @returns {Promise<void>}
+     */
+    async saveConfiguration() {
+        try {
+            // Validate form
+            if (!this.form.checkValidity()) {
+                this.form.reportValidity();
+                return;
+            }
+
+            console.log('[LLM Config] Saving configuration...');
+            this._showStatus('Saving configuration...', 'info');
+
+            const config = this._getFormData();
+            
+            const response = await this._makeAuthenticatedRequest(
+                'POST',
+                this.apiBaseUrl,
+                config
+            );
+
+            if (response.ok) {
+                const result = await response.json();
+                console.log('[LLM Config] Configuration saved:', result);
+                this._showStatus('Configuration saved successfully!', 'success', 3000);
+                
+                // Close modal after successful save
+                setTimeout(() => {
+                    const modal = bootstrap.Modal.getInstance(this.modal);
+                    if (modal) modal.hide();
+                }, 1500);
+            } else {
+                const error = await response.json();
+                throw new Error(error.detail || 'Failed to save configuration');
+            }
+        } catch (error) {
+            console.error('[LLM Config] Error saving configuration:', error);
+            this._showStatus(`Error: ${error.message}`, 'danger');
+        }
+    }
+
+    /**
+     * Clear LLM configuration
+     * @returns {Promise<void>}
+     */
+    async clearConfiguration() {
+        try {
+            if (!confirm('Are you sure you want to clear your LLM configuration?')) {
+                return;
+            }
+
+            console.log('[LLM Config] Clearing configuration...');
+            this._showStatus('Clearing configuration...', 'info');
+
+            const response = await this._makeAuthenticatedRequest('DELETE', this.apiBaseUrl);
+
+            if (response.ok) {
+                console.log('[LLM Config] Configuration cleared');
+                this._showStatus('Configuration cleared successfully!', 'success', 3000);
+                
+                // Clear form
+                this._clearForm();
+                
+                // Close modal after successful clear
+                setTimeout(() => {
+                    const modal = bootstrap.Modal.getInstance(this.modal);
+                    if (modal) modal.hide();
+                }, 1500);
+            } else {
+                throw new Error('Failed to clear configuration');
+            }
+        } catch (error) {
+            console.error('[LLM Config] Error clearing configuration:', error);
+            this._showStatus(`Error: ${error.message}`, 'danger');
+        }
+    }
+
+    /**
+     * Get form data as configuration object
+     * @private
+     * @returns {Object} Configuration data
+     */
+    _getFormData() {
+        const ip = document.getElementById('llm-ip').value.trim();
+        const port = document.getElementById('llm-port').value.trim();
+        const provider = document.getElementById('llm-provider').value;
+        const model = document.getElementById('llm-model').value.trim();
+
+        return {
+            provider: provider || null,
+            endpoint: (ip && port) ? `http://${ip}:${port}` : null,
+            model: model || null
+        };
+    }
+
+    /**
+     * Populate form with configuration data
+     * @private
+     * @param {Object} config - Configuration data
+     */
+    _populateForm(config) {
+        // Set provider
+        const providerSelect = document.getElementById('llm-provider');
+        if (providerSelect && config.provider) {
+            providerSelect.value = config.provider;
+            this._updateProviderDefaults(config.provider);
+        }
+
+        // Parse and set endpoint (IP and port)
+        if (config.endpoint) {
+            try {
+                const url = new URL(config.endpoint);
+                const ipInput = document.getElementById('llm-ip');
+                const portInput = document.getElementById('llm-port');
+                
+                if (ipInput) ipInput.value = url.hostname;
+                if (portInput) portInput.value = url.port || '80';
+            } catch (e) {
+                console.warn('[LLM Config] Invalid endpoint URL:', config.endpoint);
+            }
+        }
+
+        // Set model
+        const modelInput = document.getElementById('llm-model');
+        if (modelInput && config.model) {
+            modelInput.value = config.model;
+        }
+
+        this._updateEndpointPreview();
+    }
+
+    /**
+     * Clear all form fields
+     * @private
+     */
+    _clearForm() {
+        if (this.form) this.form.reset();
+        this._updateEndpointPreview();
+    }
+
+    /**
+     * Show status message in modal
+     * @private
+     * @param {string} message - Status message
+     * @param {string} type - Alert type (success, danger, info, warning)
+     * @param {number} [duration] - Auto-hide duration in milliseconds
+     */
+    _showStatus(message, type, duration = null) {
+        const statusDiv = document.getElementById('llm-config-status');
+        if (!statusDiv) return;
+
+        statusDiv.className = `alert alert-${type}`;
+        statusDiv.textContent = message;
+        statusDiv.style.display = 'block';
+
+        if (duration) {
+            setTimeout(() => {
+                statusDiv.style.display = 'none';
+            }, duration);
+        }
+    }
+
+    /**
+     * Make authenticated API request
+     * @private
+     * @param {string} method - HTTP method
+     * @param {string} url - Request URL
+     * @param {Object} [data] - Request body data
+     * @returns {Promise<Response>}
+     */
+    async _makeAuthenticatedRequest(method, url, data = null) {
+        // Use the same token retrieval as the rest of the app
+        const token = getAuthToken();
+        
+        if (!token) {
+            console.error('[LLM Config] No authentication token found');
+            throw new Error('Authentication required. Please log in.');
+        }
+        
+        const options = {
+            method,
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`
+            }
+        };
+
+        if (data && (method === 'POST' || method === 'PUT')) {
+            options.body = JSON.stringify(data);
+        }
+
+        return fetch(url, options);
+    }
+}
+
+// Initialize LLM configuration manager
+const llmConfigManager = new LLMConfigManager();
+
+// Initialize when DOM is ready
+document.addEventListener('DOMContentLoaded', () => {
+    llmConfigManager.initialize().catch(console.error);
+});
+
+
 // Close WebSocket when page unloads
 window.addEventListener('beforeunload', () => {
     console.log('[CHAT] Page unloading, closing WebSocket...');

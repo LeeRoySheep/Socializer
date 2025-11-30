@@ -107,7 +107,10 @@ from tools.user import UserPreferenceTool
 from tools.skills import SkillEvaluator
 from tools.search import TavilySearchTool
 from tools.events import LifeEventTool
-from tools.communication import ClarifyCommunicationTool
+from tools.communication import ClarifyCommunicationTool, CulturalStandardsChecker
+
+# Import training system
+from training import TrainingPlanManager
 
 # Import extracted handlers (modularized)
 from app.agents import ResponseHandler, ToolHandler, MemoryHandler
@@ -150,6 +153,9 @@ print(f"🤖 LLM initialized: {LLMSettings.DEFAULT_PROVIDER} - {LLMSettings.DEFA
 
 tool_1 = TavilySearch(max_results=10)
 
+# Initialize global TrainingPlanManager
+training_plan_manager = TrainingPlanManager(dm)
+
 from langchain.tools import BaseTool
 from pydantic import BaseModel, Field, field_validator
 from typing import Type
@@ -181,6 +187,7 @@ skill_evaluator = SkillEvaluator(dm)
 user_preference_tool = UserPreferenceTool(dm)
 life_event_tool = LifeEventTool(dm)
 clarify_tool = ClarifyCommunicationTool()
+cultural_checker = CulturalStandardsChecker()
 format_tool = FormatTool()
 
 # Combine all tools for agent
@@ -191,6 +198,7 @@ tools = [
     user_preference_tool,
     life_event_tool,
     clarify_tool,
+    cultural_checker,
     format_tool
 ]
 
@@ -405,12 +413,19 @@ class AiChatagent:
         self.memory_agent._load_context()
         print(f"🧠 Memory system initialized for user: {user.username}")
         
+        # ✅ Initialize training plan system
+        self.training_manager = training_plan_manager
+        self.training_plan = self.training_manager.get_or_create_training_plan(user)
+        self.message_counter = self.training_plan.get("message_count", 0)
+        print(f"🎯 Training plan loaded: {len(self.training_plan.get('trainings', {}))} active trainings")
+        
         # Initialize tool instances
         self.tavily_search = TavilySearchTool(search_tool=tool_1)
         self.conversation_tool = ConversationRecallTool(dm)
         self.skill_evaluator_tool = SkillEvaluator(dm)
         self.user_preference_tool = UserPreferenceTool(dm)
         self.clarify_tool = ClarifyCommunicationTool()
+        self.cultural_checker_tool = CulturalStandardsChecker()
         
         # ✅ self.tools will be generated from actual tool instances later
         # This ensures names always match what's bound to the LLM
@@ -655,6 +670,18 @@ class AiChatagent:
             last_message = messages[-1]
             print(f"Last message type: {type(last_message).__name__}")
             
+            # ✅ TRAINING: Increment message count for user messages
+            should_check_training = False
+            if hasattr(last_message, 'type') and last_message.type == 'human':
+                self.message_counter += 1
+                self.training_manager.increment_message_count(self.user)
+                print(f"📊 Message count: {self.message_counter}")
+                
+                # Check every 5th message for training progress
+                if self.message_counter % 5 == 0:
+                    should_check_training = True
+                    print(f"🎯 Training progress check triggered (message #{self.message_counter})")
+            
             # ✅ AI-BASED LANGUAGE DETECTION (if not yet confirmed)
             detected_language_info = None
             if not self.language_confirmed and hasattr(last_message, 'type') and last_message.type == 'human':
@@ -850,6 +877,8 @@ class AiChatagent:
   * This permanently saves their preference
 - Always ask for language confirmation IN THE DETECTED LANGUAGE, not in English!
 
+{self.training_manager.get_training_context_for_prompt(self.user)}
+
 ⚠️ **CRITICAL: ALWAYS PROVIDE A RESPONSE**
 After receiving tool results, you MUST respond with helpful, informative content.
 NEVER return empty responses. Always explain what you found and help the user.
@@ -1031,6 +1060,13 @@ When user asks about:
      * Use IMMEDIATELY when foreign language detected
      * Use when confusion signals appear
      * Don't ask permission, just help
+   
+   - `check_cultural_standards`: Check cultural/political sensitivity in chat rooms
+     * Use when monitoring multi-user conversations
+     * Check messages for culturally sensitive topics
+     * Provide suggestions for respectful communication
+     * Get latest cultural standards from web
+     * Helps avoid misunderstandings across cultures
    
    **CRITICAL: Always pass user_id: {self.user.id} to user-specific tools!**
 
@@ -1316,6 +1352,31 @@ When user asks about:
             # Regular response (no tool calls) - save to memory and return it
             result = {"messages": [response]}
             self.memory_handler.save_conversation(state, result)
+            
+            # ✅ TRAINING: Check progress every 5th message
+            if should_check_training:
+                try:
+                    print("🎯 Evaluating training progress...")
+                    # Use skill evaluator to analyze conversation
+                    skill_analysis = self.skill_evaluator_tool._run(
+                        user_id=self.user.id,
+                        messages=[str(msg.content) for msg in messages[-5:] if hasattr(msg, 'content')],
+                        use_web_research=False  # Skip web research for performance
+                    )
+                    
+                    # Update training progress
+                    updated_training = self.training_manager.update_training_progress(
+                        self.user,
+                        skill_analysis
+                    )
+                    
+                    # Update local training plan
+                    self.training_plan = updated_training
+                    
+                    print(f"✅ Training progress updated: {skill_analysis.get('status')}")
+                except Exception as e:
+                    print(f"⚠️  Error checking training progress: {e}")
+            
             return result
                 
         except Exception as e:

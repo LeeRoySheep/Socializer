@@ -64,6 +64,11 @@ class User(Base):
     encryption_key: Mapped[str] = mapped_column(String, nullable=True)  # User-specific encryption key
     conversation_memory: Mapped[str] = mapped_column(Text, nullable=True)  # Encrypted conversation memory
     
+    # LLM Configuration fields - Allow users to configure custom local LLM endpoints
+    llm_provider: Mapped[Optional[str]] = mapped_column(String, nullable=True, default=None)  # e.g., 'lm_studio', 'ollama', 'openai'
+    llm_endpoint: Mapped[Optional[str]] = mapped_column(String, nullable=True, default=None)  # e.g., 'http://192.168.1.100:1234'
+    llm_model: Mapped[Optional[str]] = mapped_column(String, nullable=True, default=None)  # e.g., 'llama-3.2', 'local-model'
+    
     # Relationships
     user_skills: Mapped[list["UserSkill"]] = relationship(
         "UserSkill", 
