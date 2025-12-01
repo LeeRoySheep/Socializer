@@ -9,13 +9,16 @@ A modern social AI chat application built with FastAPI, SQLAlchemy, and LangChai
 
 ## ✨ Features
 
-- **User Authentication**: Secure user registration and login system
-- **AI-Powered Chat**: Intelligent responses using LangChain and OpenAI
-- **Conversation History**: Track and retrieve past conversations
+- **User Authentication**: Secure JWT-based authentication with bcrypt password hashing
+- **Encrypted Data**: All personal data (emails, passwords) encrypted with bcrypt, conversation memory encrypted with Fernet
+- **Multi-Provider AI**: Support for OpenAI, Claude, Gemini, and local models (LM Studio/Ollama)
+- **Automatic Language Detection**: AI-powered detection supporting 14+ languages
+- **Social Skills Training**: Automated training system with progress tracking
+- **Conversation History**: Encrypted conversation storage per user
 - **RESTful API**: Built with FastAPI for high performance
 - **Asynchronous**: Built with async/await for better performance
-- **Tested**: Comprehensive test suite with pytest
-- **CI/CD**: Automated testing and deployment with GitHub Actions
+- **Comprehensive Tests**: 93%+ test coverage with pytest
+- **Privacy-First**: Option for local AI processing (no data leaves your machine)
 
 ## 🚀 Getting Started
 
@@ -78,6 +81,24 @@ A modern social AI chat application built with FastAPI, SQLAlchemy, and LangChai
    
    Explore the API documentation at `http://localhost:8000/docs`
 
+## 🤖 AI Provider Comparison
+
+Socializer supports multiple AI providers. We've tested them for **speed**, **cost**, and **quality**:
+
+| Provider | Speed | Cost/Query | Quality | Best For |
+|----------|-------|------------|---------|----------|
+| **GPT-4o-mini** | 7.73s ⚡ | $0.0002 💵 | ⭐⭐⭐⭐ | **Production** (Fast + Cheap) |
+| **Gemini 2.0 Flash** | 7.86s ⚡ | **FREE** 🎉 | ⭐⭐⭐⭐ | **Development** (No cost) |
+| **Claude Sonnet 4.0** | 8.08s | $0.0036 💰 | ⭐⭐⭐⭐⭐ | **Premium** (Best quality) |
+| **LM Studio (Local)** | 28.87s 🐌 | **FREE** 🎉 | ⭐⭐⭐ | **Privacy** (Offline) |
+
+**Cost Comparison (1 million queries):**
+- Gemini: $0 (FREE)
+- GPT-4o-mini: $200
+- Claude: $3,600 (18x more expensive!)
+
+📊 **Detailed comparison**: See [AI_PROVIDER_COMPARISON.md](AI_PROVIDER_COMPARISON.md)
+
 ## 🧪 Running Tests
 
 ```bash
@@ -89,6 +110,9 @@ pytest --cov=./ --cov-report=term-missing
 
 # Run specific test file
 pytest tests/test_chat_interface.py -v
+
+# Run AI provider comparison
+python tests/manual/ai_provider_real_comparison.py
 ```
 
 ## 🛠 Development

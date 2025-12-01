@@ -138,22 +138,31 @@ def test_client(test_session: Session) -> Generator[TestClient, None, None]:
 
 @pytest.fixture
 def test_user(test_session: Session) -> User:
-    """Create a test user in the database."""
+    """Create a test user in the database with ALL required fields."""
     from passlib.context import CryptContext
+    from cryptography.fernet import Fernet
     
     pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
     hashed_password = pwd_context.hash("testpassword")
+    hashed_email = pwd_context.hash("test@example.com")
+    encryption_key = Fernet.generate_key().decode('utf-8')
     
     # Clean up any existing test user
     test_session.query(User).filter(User.username == "testuser").delete()
     test_session.commit()
     
-    # Create a new test user
+    # Create a new test user with ALL required fields from data_model.py
     user = User(
         username="testuser",
-        hashed_email="test@example.com",
+        hashed_email=hashed_email,
         hashed_password=hashed_password,
+        hashed_name="",  # Privacy: no name stored
+        encryption_key=encryption_key,
+        is_active=True,
         role="user",
+        temperature=0.7,  # Default AI temperature
+        preferences={},  # Empty preferences dict
+        messages=0,  # Message count starts at 0
         member_since=datetime.now()
     )
     test_session.add(user)

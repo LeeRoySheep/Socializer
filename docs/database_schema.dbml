@@ -1,0 +1,263 @@
+// Socializer Database Schema
+// Use this at https://dbdiagram.io/d to visualize
+
+Project Socializer {
+  database_type: 'SQLite'
+  Note: '''
+    # Socializer - AI-Powered Social Skills Training Platform
+    
+    This database supports an automated empathy and conversation training system
+    with secure encrypted user memory, chat rooms, and skill tracking.
+    
+    **Key Features:**
+    - User-specific encryption for all personal data
+    - Automated training plan management
+    - Multi-room chat system with AI integration
+    - Comprehensive skill tracking and progress monitoring
+  '''
+}
+
+// ===================================
+// CORE USER TABLES
+// ===================================
+
+Table users {
+  id integer [pk, increment, note: 'Primary key']
+  username varchar [unique, not null, note: 'Unique username']
+  role varchar [default: 'user', note: 'User role: admin/user']
+  is_active boolean [default: true, not null, note: 'Account status']
+  temperature float [default: 0.7, note: 'AI temperature setting']
+  preferences json [default: '{}', note: 'User preferences as JSON']
+  hashed_name varchar [default: '', note: 'Privacy-hashed name']
+  hashed_password varchar [not null, note: 'Bcrypt hashed password']
+  hashed_email varchar [unique, not null, note: 'Privacy-hashed email']
+  member_since date [default: `CURRENT_DATE`, note: 'Registration date']
+  messages integer [default: 0, note: 'Total message count']
+  
+  // Memory & Encryption
+  encryption_key varchar [null, note: 'User-specific Fernet encryption key']
+  conversation_memory text [null, note: 'Encrypted conversation memory blob']
+  
+  // LLM Configuration
+  llm_provider varchar [null, note: 'LLM provider: lm_studio/ollama/openai']
+  llm_endpoint varchar [null, note: 'Custom LLM endpoint URL']
+  llm_model varchar [null, note: 'Specific model name']
+  
+  indexes {
+    id
+  }
+  
+  Note: 'Core user account with encryption support and custom LLM config'
+}
+
+// ===================================
+// AUTHENTICATION & SECURITY
+// ===================================
+
+Table token_blacklist {
+  id integer [pk, increment]
+  token varchar [unique, not null, note: 'Blacklisted JWT token']
+  expires_at datetime [not null, note: 'Token expiration time']
+  created_at datetime [default: `CURRENT_TIMESTAMP`, not null]
+  user_id integer [null, ref: > users.id]
+  reason varchar [null, note: 'Reason for blacklisting']
+  
+  indexes {
+    id
+    token
+  }
+  
+  Note: 'JWT token blacklist for logout/revocation'
+}
+
+Table error_logs {
+  id integer [pk, increment]
+  timestamp datetime [default: `CURRENT_TIMESTAMP`]
+  user_id integer [null, ref: > users.id]
+  error_type varchar(100) [not null, note: 'Error type/category']
+  error_message text [not null, note: 'Full error message']
+  stack_trace text [null, note: 'Stack trace for debugging']
+  context json [null, note: 'Additional context as JSON']
+  
+  indexes {
+    id
+  }
+  
+  Note: 'Application error logging with user context'
+}
+
+// ===================================
+// SKILLS & TRAINING SYSTEM
+// ===================================
+
+Table skills {
+  id integer [pk, increment]
+  skill_name varchar [unique, note: 'Skill name: empathy, active_listening, etc.']
+  
+  indexes {
+    id
+  }
+  
+  Note: 'Catalog of available skills for training'
+}
+
+Table user_skills {
+  id integer [pk, increment]
+  user_id integer [not null, ref: > users.id]
+  skill_id integer [not null, ref: > skills.id]
+  level integer [default: 0, note: 'Skill level: 0-10']
+  
+  indexes {
+    (user_id, skill_id) [unique, name: '_user_skill_uc']
+  }
+  
+  Note: 'Many-to-many: Users to Skills with proficiency level'
+}
+
+Table training {
+  user_id integer [pk, ref: > users.id, note: 'Composite PK part 1']
+  skill_id integer [pk, ref: > skills.id, note: 'Composite PK part 2']
+  status varchar [default: 'pending', note: 'Status: pending/active/completed']
+  progress float [default: 0.0, note: 'Training progress: 0.0-1.0']
+  started_at date [default: `CURRENT_DATE`]
+  completed_at date [null]
+  notes varchar [null, note: 'Training notes and milestones']
+  
+  Note: 'Active training sessions with progress tracking'
+}
+
+// ===================================
+// USER PREFERENCES & PERSONALIZATION
+// ===================================
+
+Table user_preferences {
+  id integer [pk, increment]
+  user_id integer [not null, ref: > users.id]
+  preference_type varchar [not null, note: 'Type: communication_style/interests/goals']
+  preference_key varchar [not null, note: 'Specific preference key']
+  preference_value json [not null, note: 'Preference value as JSON']
+  confidence float [default: 1.0, note: 'Confidence score: 0.0-1.0']
+  last_updated date [default: `CURRENT_DATE`, note: 'Last modification date']
+  
+  indexes {
+    id
+    (user_id, preference_type, preference_key) [unique]
+  }
+  
+  Note: 'User preferences learned by AI agent'
+}
+
+// ===================================
+// CHAT SYSTEM
+// ===================================
+
+Table chat_rooms {
+  id integer [pk, increment]
+  name varchar [null, note: 'Optional custom room name']
+  creator_id integer [not null, ref: > users.id]
+  created_at datetime [default: `CURRENT_TIMESTAMP`, not null]
+  is_active boolean [default: true, not null]
+  room_type varchar [default: 'group', not null, note: 'Type: direct/group/private']
+  ai_enabled boolean [default: true, not null, note: 'AI participation enabled']
+  password varchar [null, note: 'Optional room password']
+  is_public boolean [default: false, not null, note: 'Discoverable vs invite-only']
+  
+  indexes {
+    id
+  }
+  
+  Note: 'Private chat rooms supporting 1-on-1 and group conversations'
+}
+
+Table room_members {
+  id integer [pk, increment]
+  room_id integer [not null, ref: > chat_rooms.id]
+  user_id integer [null, ref: > users.id, note: 'NULL for AI members']
+  joined_at datetime [default: `CURRENT_TIMESTAMP`, not null]
+  role varchar [default: 'member', not null, note: 'Role: creator/member/ai']
+  is_active boolean [default: true, not null]
+  last_read_at datetime [null, note: 'Last message read timestamp']
+  
+  indexes {
+    id
+    (room_id, user_id) [unique, name: '_room_user_uc']
+  }
+  
+  Note: 'Room membership tracking with read status'
+}
+
+Table room_messages {
+  id integer [pk, increment]
+  room_id integer [not null, ref: > chat_rooms.id]
+  sender_id integer [null, ref: > users.id, note: 'NULL for AI messages']
+  sender_type varchar [default: 'user', not null, note: 'Type: user/ai/system']
+  content text [not null, note: 'Message content']
+  message_type varchar [default: 'text', not null, note: 'Type: text/invite/system']
+  message_metadata json [null, note: 'Additional metadata for special messages']
+  created_at datetime [default: `CURRENT_TIMESTAMP`, not null]
+  edited_at datetime [null]
+  is_deleted boolean [default: false, not null]
+  
+  indexes {
+    id
+    created_at
+  }
+  
+  Note: 'Messages in private chat rooms'
+}
+
+Table general_chat_messages {
+  id integer [pk, increment]
+  sender_id integer [not null, ref: > users.id]
+  content text [not null]
+  created_at datetime [default: `CURRENT_TIMESTAMP`, not null]
+  
+  indexes {
+    id
+    created_at
+  }
+  
+  Note: 'Messages in the public general chat room'
+}
+
+Table room_invites {
+  id integer [pk, increment]
+  room_id integer [not null, ref: > chat_rooms.id]
+  inviter_id integer [not null, ref: > users.id, note: 'User sending invite']
+  invitee_id integer [not null, ref: > users.id, note: 'User receiving invite']
+  status varchar [default: 'pending', not null, note: 'Status: pending/accepted/declined']
+  message_id integer [null, ref: > room_messages.id, note: 'Associated invite message']
+  created_at datetime [default: `CURRENT_TIMESTAMP`, not null]
+  responded_at datetime [null]
+  
+  indexes {
+    id
+    (room_id, invitee_id) [unique, name: '_room_invitee_uc']
+  }
+  
+  Note: 'Room invitations with acceptance tracking'
+}
+
+// ===================================
+// RELATIONSHIPS SUMMARY
+// ===================================
+
+// User → Token Blacklist (1:N)
+// User → Error Logs (1:N)
+// User → User Skills (1:N)
+// User → Training (1:N)
+// User → User Preferences (1:N)
+// User → Chat Rooms (1:N as creator)
+// User → Room Members (1:N)
+// User → Room Messages (1:N)
+// User → General Chat Messages (1:N)
+// User → Room Invites (1:N as inviter, 1:N as invitee)
+
+// Skill → User Skills (1:N)
+// Skill → Training (1:N)
+
+// Chat Room → Room Members (1:N)
+// Chat Room → Room Messages (1:N)
+// Chat Room → Room Invites (1:N)
+
+// Room Message → Room Invites (1:1)
