@@ -271,6 +271,10 @@ app.include_router(rooms.router, prefix="/api/rooms", tags=["Private Rooms"])
 from app.routers import ai
 app.include_router(ai.router, tags=["AI/LLM"])
 
+# Include Local LLM router for backend-managed local LLM connections
+from app.routers import local_llm
+app.include_router(local_llm.router, tags=["Local LLM"])
+
 # Note: Auth endpoints are defined directly in main.py at /api/auth/
 # (lines ~1345, ~1505) to support both JSON API and HTML form submissions
 

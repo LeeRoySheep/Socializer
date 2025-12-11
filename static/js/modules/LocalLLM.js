@@ -1,17 +1,23 @@
 /**
- * LocalLLM - Direct browser-to-local-LLM communication
- * Enables using LM Studio or Ollama directly from the browser
- * while the app is hosted on a public server.
+ * LocalLLM - Backend-managed local LLM communication
+ * 
+ * ARCHITECTURE: Frontend → Backend API → Local LLM
+ * - All LLM calls go through authenticated backend endpoints
+ * - No direct browser-to-LLM connections
+ * - Frontend only communicates via API routes
+ * 
+ * Backend endpoints:
+ * - GET  /api/local-llm/ping   - Test connection
+ * - GET  /api/local-llm/status - Get status and models
+ * - POST /api/local-llm/chat   - Send chat message
+ * - GET  /api/local-llm/models - List models
  */
 
 export class LocalLLM {
     constructor() {
-        this.providers = {
-            lmstudio: { url: 'http://localhost:1234/v1', name: 'LM Studio' },
-            ollama: { url: 'http://localhost:11434/v1', name: 'Ollama' }
-        };
-        this.activeProvider = null;
+        this.apiBase = '/api/local-llm';
         this.isAvailable = false;
+        this.lastPingResult = null;
         this.settings = this.loadSettings();
     }
 
@@ -23,8 +29,7 @@ export class LocalLLM {
         return saved ? JSON.parse(saved) : {
             enabled: false,
             provider: 'lmstudio',
-            customUrl: '',
-            model: 'local-model'
+            model: 'ibm/granite-4-h-tiny'
         };
     }
 
@@ -37,17 +42,55 @@ export class LocalLLM {
     }
 
     /**
-     * Get the base URL for the active provider
+     * Get auth headers from current session
      */
-    getBaseUrl() {
-        if (this.settings.customUrl) {
-            return this.settings.customUrl;
+    _getAuthHeaders() {
+        const token = window.ACCESS_TOKEN || localStorage.getItem('access_token');
+        if (!token) {
+            console.warn('[LocalLLM] No auth token available');
+            return { 'Content-Type': 'application/json' };
         }
-        return this.providers[this.settings.provider]?.url || this.providers.lmstudio.url;
+        const cleanToken = token.replace(/^Bearer\s+/, '');
+        return {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${cleanToken}`
+        };
     }
 
     /**
-     * Check if local LLM is available
+     * Ping backend to test local LLM connection
+     * Returns ping result with latency and status
+     */
+    async ping() {
+        console.log('[LocalLLM] Pinging backend for local LLM status...');
+        
+        try {
+            const response = await fetch(`${this.apiBase}/ping`, {
+                method: 'GET',
+                headers: this._getAuthHeaders()
+            });
+            
+            if (response.ok) {
+                const data = await response.json();
+                console.log('[LocalLLM] Ping result:', data);
+                this.lastPingResult = data;
+                this.isAvailable = data.success;
+                return data;
+            } else if (response.status === 401) {
+                console.warn('[LocalLLM] Not authenticated');
+                return { success: false, message: 'Not authenticated', trace_id: '-' };
+            } else {
+                const error = await response.json();
+                return { success: false, message: error.detail || 'Ping failed', trace_id: '-' };
+            }
+        } catch (error) {
+            console.error('[LocalLLM] Ping error:', error);
+            return { success: false, message: error.message, trace_id: '-' };
+        }
+    }
+
+    /**
+     * Check if local LLM is available (via backend)
      */
     async checkAvailability() {
         if (!this.settings.enabled) {
@@ -55,68 +98,110 @@ export class LocalLLM {
             return false;
         }
 
-        const baseUrl = this.getBaseUrl();
-        
+        const result = await this.ping();
+        this.isAvailable = result.success;
+        return result.success;
+    }
+
+    /**
+     * Get local LLM status from backend
+     */
+    async getStatus() {
         try {
-            const response = await fetch(`${baseUrl}/models`, {
+            const response = await fetch(`${this.apiBase}/status`, {
                 method: 'GET',
-                headers: { 'Content-Type': 'application/json' },
-                signal: AbortSignal.timeout(3000) // 3 second timeout
+                headers: this._getAuthHeaders()
             });
             
             if (response.ok) {
                 const data = await response.json();
-                console.log('[LocalLLM] Available models:', data);
-                this.isAvailable = true;
-                this.activeProvider = this.settings.provider;
-                return true;
+                console.log('[LocalLLM] Status:', data);
+                this.isAvailable = data.available;
+                return data;
             }
         } catch (error) {
-            console.log('[LocalLLM] Not available:', error.message);
+            console.error('[LocalLLM] Status error:', error);
         }
         
-        this.isAvailable = false;
-        return false;
+        return { available: false, models: [], endpoint: '', provider: 'unknown' };
     }
 
     /**
-     * Send a chat message directly to local LLM
+     * Get available models from backend
+     */
+    async getModels() {
+        try {
+            const response = await fetch(`${this.apiBase}/models`, {
+                method: 'GET',
+                headers: this._getAuthHeaders()
+            });
+            
+            if (response.ok) {
+                const data = await response.json();
+                console.log('[LocalLLM] Models:', data);
+                return data.models || [];
+            }
+        } catch (error) {
+            console.error('[LocalLLM] Models error:', error);
+        }
+        
+        return [];
+    }
+
+    /**
+     * Send chat message via backend to local LLM
      */
     async chat(messages, options = {}) {
-        if (!this.isAvailable) {
-            throw new Error('Local LLM not available');
+        if (!this.settings.enabled) {
+            throw new Error('Local LLM not enabled');
         }
 
-        const baseUrl = this.getBaseUrl();
-        const model = options.model || this.settings.model || 'local-model';
+        const model = options.model || this.settings.model || 'ibm/granite-4-h-tiny';
+        
+        console.log('[LocalLLM] Sending chat via backend API...');
+        console.log('[LocalLLM] Model:', model);
+        console.log('[LocalLLM] Messages:', messages.length);
 
         const payload = {
-            model: model,
             messages: messages,
+            model: model,
             temperature: options.temperature || 0.7,
-            max_tokens: options.max_tokens || 2000,
-            stream: options.stream || false
+            max_tokens: options.max_tokens || 1000
         };
 
         try {
-            const response = await fetch(`${baseUrl}/chat/completions`, {
+            const response = await fetch(`${this.apiBase}/chat`, {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
+                headers: this._getAuthHeaders(),
                 body: JSON.stringify(payload)
             });
 
             if (!response.ok) {
-                throw new Error(`LLM error: ${response.status}`);
+                if (response.status === 401) {
+                    throw new Error('Not authenticated');
+                }
+                if (response.status === 503) {
+                    const error = await response.json();
+                    throw new Error(error.detail || 'Local LLM not available');
+                }
+                throw new Error(`API error: ${response.status}`);
             }
 
             const data = await response.json();
+            console.log('[LocalLLM] Response received:', {
+                success: data.success,
+                trace_id: data.trace_id,
+                latency_ms: data.latency_ms,
+                response_preview: data.response?.substring(0, 50) + '...'
+            });
+
             return {
-                content: data.choices[0]?.message?.content || '',
+                content: data.response || '',
                 model: data.model,
-                usage: data.usage,
-                provider: 'local'
+                usage: data.tokens,
+                provider: 'local',
+                trace_id: data.trace_id,
+                latency_ms: data.latency_ms
             };
         } catch (error) {
             console.error('[LocalLLM] Chat error:', error);
@@ -125,75 +210,16 @@ export class LocalLLM {
     }
 
     /**
-     * Stream chat response from local LLM
-     */
-    async *streamChat(messages, options = {}) {
-        if (!this.isAvailable) {
-            throw new Error('Local LLM not available');
-        }
-
-        const baseUrl = this.getBaseUrl();
-        const model = options.model || this.settings.model || 'local-model';
-
-        const payload = {
-            model: model,
-            messages: messages,
-            temperature: options.temperature || 0.7,
-            max_tokens: options.max_tokens || 2000,
-            stream: true
-        };
-
-        const response = await fetch(`${baseUrl}/chat/completions`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload)
-        });
-
-        if (!response.ok) {
-            throw new Error(`LLM error: ${response.status}`);
-        }
-
-        const reader = response.body.getReader();
-        const decoder = new TextDecoder();
-        let buffer = '';
-
-        while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-
-            buffer += decoder.decode(value, { stream: true });
-            const lines = buffer.split('\n');
-            buffer = lines.pop() || '';
-
-            for (const line of lines) {
-                if (line.startsWith('data: ')) {
-                    const data = line.slice(6);
-                    if (data === '[DONE]') return;
-                    
-                    try {
-                        const parsed = JSON.parse(data);
-                        const content = parsed.choices[0]?.delta?.content;
-                        if (content) {
-                            yield content;
-                        }
-                    } catch (e) {
-                        // Skip invalid JSON
-                    }
-                }
-            }
-        }
-    }
-
-    /**
      * Get status info for UI display
      */
-    getStatus() {
+    getStatusSync() {
         return {
             enabled: this.settings.enabled,
             available: this.isAvailable,
-            provider: this.activeProvider || this.settings.provider,
-            providerName: this.providers[this.settings.provider]?.name || 'Custom',
-            url: this.getBaseUrl()
+            provider: this.settings.provider,
+            providerName: this.settings.provider === 'lmstudio' ? 'LM Studio' : 'Ollama',
+            model: this.settings.model,
+            lastPing: this.lastPingResult
         };
     }
 }

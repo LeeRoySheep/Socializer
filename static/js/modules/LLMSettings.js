@@ -318,27 +318,32 @@ export class LLMSettings {
     }
 
     /**
-     * Test connection to local LLM
+     * Test connection to local LLM via backend ping
      */
     async testConnection() {
-        this.updateStatus('Testing...', 'testing');
+        this.updateStatus('Testing via backend...', 'testing');
         
-        // Temporarily apply settings for test
+        // Temporarily enable for test
         const provider = document.getElementById('llm-provider').value;
-        const customUrl = document.getElementById('llm-custom-url').value;
+        const model = document.getElementById('llm-model').value;
         
         localLLM.saveSettings({
             enabled: true,
             provider,
-            customUrl: provider === 'custom' ? customUrl : ''
+            model
         });
 
-        const available = await localLLM.checkAvailability();
+        // Use backend ping endpoint
+        const result = await localLLM.ping();
         
-        if (available) {
-            this.updateStatus('✅ Connected!', 'online');
+        if (result.success) {
+            this.updateStatus(
+                `✅ Connected! (${result.latency_ms?.toFixed(0)}ms, ${result.models_available} models)`, 
+                'online'
+            );
+            console.log('[LLMSettings] Ping result:', result);
         } else {
-            this.updateStatus('❌ Connection failed', 'offline');
+            this.updateStatus(`❌ ${result.message}`, 'offline');
         }
     }
 
