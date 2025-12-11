@@ -725,66 +725,39 @@ async function handleAICommand(message) {
         const selectedModel = window.getCurrentLLMModel ? window.getCurrentLLMModel() : 'gpt-4o-mini';
         console.log('[AI] Using model:', selectedModel);
         
-        // Check if local LLM is enabled - use it if enabled, regardless of model name in dropdown
-        // The localLLM.settings.model will contain the actual local model name (e.g., "ibm/granite-4-h-tiny")
+        // Always use backend API for AI chat (tools are handled there)
+        // If local LLM is enabled, pass use_local_llm flag to backend
         const useLocalLLM = localLLM.settings.enabled;
+        const modelToUse = useLocalLLM ? (localLLM.settings.model || 'local-model') : selectedModel;
+        
+        console.log('[AI] Sending to backend API...');
+        console.log('[AI] Model:', modelToUse, useLocalLLM ? '(local LLM)' : '(cloud)');
         
         let responseText = '';
         let toolsUsed = [];
         
-        if (useLocalLLM) {
-            // Try local LLM first
-            console.log('[AI] 🏠 Attempting local LLM connection...');
-            console.log('[AI] 🏠 Local LLM settings:', localLLM.settings);
-            try {
-                const available = await localLLM.checkAvailability();
-                if (available) {
-                    console.log('[AI] ✅ Local LLM available, sending request...');
-                    // Use the model from local LLM settings, not the dropdown
-                    const localModel = localLLM.settings.model || 'local-model';
-                    console.log('[AI] 🏠 Using local model:', localModel);
-                    const messages = [
-                        { role: 'system', content: 'You are a helpful AI assistant for Socializer, a social skills training app. Be friendly and supportive.' },
-                        { role: 'user', content: aiPrompt }
-                    ];
-                    const result = await localLLM.chat(messages, { model: localModel });
-                    responseText = result.content;
-                    toolsUsed = ['local_llm'];
-                    console.log('[AI] ✅ Local LLM response received');
-                } else {
-                    throw new Error('Local LLM not available');
-                }
-            } catch (localError) {
-                console.warn('[AI] ⚠️ Local LLM failed, falling back to cloud:', localError.message);
-                // Fall through to cloud API
-            }
-        }
+        const response = await fetch('/api/ai/chat', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${AUTH_TOKEN}`
+            },
+            body: JSON.stringify({
+                message: aiPrompt,
+                conversation_id: `chat-${currentUser.id}`,
+                model: modelToUse,
+                use_local_llm: useLocalLLM
+            })
+        });
         
-        // Use cloud API if local didn't work or wasn't enabled
-        if (!responseText) {
-            console.log('[AI] ☁️ Using cloud API...');
-            const response = await fetch('/api/ai/chat', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${AUTH_TOKEN}`
-                },
-                body: JSON.stringify({
-                    message: aiPrompt,
-                    conversation_id: `chat-${currentUser.id}`,
-                    model: selectedModel
-                })
-            });
-            
-            if (response.ok) {
-                const data = await response.json();
-                console.log('[AI] Response data:', data);
-                responseText = data.response;
-                toolsUsed = data.tools_used || [];
-            } else {
-                const errorData = await response.json();
-                throw new Error(errorData.detail || 'Unknown error');
-            }
+        if (response.ok) {
+            const data = await response.json();
+            console.log('[AI] Response data:', data);
+            responseText = data.response;
+            toolsUsed = data.tools_used || [];
+        } else {
+            const errorData = await response.json();
+            throw new Error(errorData.detail || 'Unknown error');
         }
         
         hideAITypingIndicator();

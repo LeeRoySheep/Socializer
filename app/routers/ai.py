@@ -48,12 +48,17 @@ class ChatRequest(BaseModel):
         description="LLM model to use",
         example="gpt-4o-mini"
     )
+    use_local_llm: Optional[bool] = Field(
+        False,
+        description="Force use of local LLM (LM Studio) regardless of model name"
+    )
     
     class Config:
         json_schema_extra = {
             "example": {
                 "message": "What's the weather in Paris?",
-                "conversation_id": "conv_123"
+                "conversation_id": "conv_123",
+                "use_local_llm": False
             }
         }
 
@@ -341,6 +346,18 @@ async def chat_with_ai(
                     temperature=user.temperature or 0.7
                 )
         
+        # Check if frontend requested local LLM
+        elif request.use_local_llm:
+            provider = "lm_studio"
+            # Use the model name from request, or default
+            local_model = selected_model if selected_model != "gpt-4o-mini" else "local-model"
+            ote_logger.logger.info(f"Using local LLM (frontend requested): model={local_model}")
+            model_llm = LLMManager.get_llm(
+                provider=provider,
+                model=local_model,
+                temperature=user.temperature or 0.7,
+                base_url="http://localhost:1234/v1"
+            )
         # Use default LLM configuration based on selected model
         elif "lm-studio" in selected_model.lower():
             provider = "lm_studio"
