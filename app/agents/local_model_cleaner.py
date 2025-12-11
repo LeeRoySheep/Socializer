@@ -119,6 +119,10 @@ class LocalModelCleaner:
                  '172.24.', '172.25.', '172.26.', '172.27.', '172.28.', '172.29.',
                  '172.30.', '172.31.']
     
+    # Cloud API endpoints that should NEVER be treated as local
+    CLOUD_ENDPOINTS = ['api.openai.com', 'openai.com', 'api.anthropic.com', 
+                       'generativelanguage.googleapis.com', 'aiplatform.googleapis.com']
+    
     @classmethod
     def is_local_model(cls, model_name: str = "", endpoint: str = "") -> bool:
         """
@@ -131,6 +135,13 @@ class LocalModelCleaner:
         Returns:
             bool: True if this appears to be a local model
         """
+        # First, check if it's definitely a CLOUD endpoint (never local)
+        if endpoint:
+            endpoint_lower = endpoint.lower()
+            for cloud_host in cls.CLOUD_ENDPOINTS:
+                if cloud_host in endpoint_lower:
+                    return False  # Definitely cloud, not local
+        
         # Check endpoint for local indicators
         if endpoint:
             endpoint_lower = endpoint.lower()
@@ -141,10 +152,15 @@ class LocalModelCleaner:
                 if ip in endpoint_lower:
                     return True
         
-        # Check model name for local indicators
+        # If no endpoint provided, model name alone is NOT enough to determine local
+        # (prevents false positives when using cloud APIs with generic model names)
+        if not endpoint:
+            return False
+        
+        # Check model name for local indicators (only if endpoint is set and not cloud)
         if model_name:
             model_lower = model_name.lower()
-            local_indicators = ['local', 'lm-studio', 'lmstudio', 'ollama', 'gguf', 'ggml']
+            local_indicators = ['lm-studio', 'lmstudio', 'ollama', 'gguf', 'ggml']
             for indicator in local_indicators:
                 if indicator in model_lower:
                     return True
