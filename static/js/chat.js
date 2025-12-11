@@ -759,6 +759,16 @@ async function handleAICommand(message) {
             if (response.ok) {
                 const data = await response.json();
                 console.log('[AI] ✅ Backend response received:', data);
+                
+                // Check if backend returned a connection error (can't reach local LLM)
+                if (useLocalLLM && data.response && 
+                    (data.response.includes('Connection error') || 
+                     data.response.includes('connection') ||
+                     data.response.includes('localhost'))) {
+                    console.log('[AI] ⚠️ Backend cannot reach local LLM (connection error in response)');
+                    throw new Error('FALLBACK_TO_DIRECT');
+                }
+                
                 responseText = data.response;
                 toolsUsed = data.tools_used || [];
             } else {
