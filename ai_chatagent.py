@@ -451,12 +451,31 @@ class AiChatagent:
         
         print(f"🔧 Detected LLM provider: {provider}")
         
-        # ✅ NEW: Detect if using local model (LM Studio, Ollama)
-        self.llm_endpoint = getattr(llm, 'base_url', getattr(llm, 'api_base', ''))
-        if isinstance(self.llm_endpoint, object) and hasattr(self.llm_endpoint, 'unicode_string'):
-            self.llm_endpoint = str(self.llm_endpoint)  # Convert Pydantic URL to string
-        else:
-            self.llm_endpoint = str(self.llm_endpoint) if self.llm_endpoint else ''
+        # ✅ Detect if using local model (LM Studio, Ollama)
+        # Try multiple attribute names that different LangChain versions use
+        self.llm_endpoint = ''
+        for attr in ['base_url', 'openai_api_base', 'api_base', 'client']:
+            val = getattr(llm, attr, None)
+            if val:
+                # Handle Pydantic URL objects
+                if hasattr(val, 'unicode_string'):
+                    self.llm_endpoint = val.unicode_string()
+                elif hasattr(val, '__str__'):
+                    val_str = str(val)
+                    # Check if it looks like a URL
+                    if 'localhost' in val_str or '127.0.0.1' in val_str or ':1234' in val_str or ':11434' in val_str:
+                        self.llm_endpoint = val_str
+                        break
+                else:
+                    self.llm_endpoint = str(val) if val else ''
+                if self.llm_endpoint and ('localhost' in self.llm_endpoint or '127.0.0.1' in self.llm_endpoint):
+                    break
+        
+        # Also check if the client has base_url
+        if not self.llm_endpoint and hasattr(llm, 'client') and hasattr(llm.client, 'base_url'):
+            self.llm_endpoint = str(llm.client.base_url)
+        
+        print(f"🔍 LLM endpoint detected: '{self.llm_endpoint}'")
         
         self.is_local_model = LocalModelCleaner.is_local_model(
             model_name=str(llm_model_name),
@@ -465,6 +484,8 @@ class AiChatagent:
         
         if self.is_local_model:
             print(f"🏠 Local model detected: {llm_model_name} at {self.llm_endpoint}")
+        else:
+            print(f"☁️  Cloud model detected: {llm_model_name}")
         
         # Initialize ToolManager for this provider
         self.tool_manager = ToolManager(provider=provider, data_manager=dm)
@@ -1408,7 +1429,10 @@ When user asks about:
             # 🧹 Local Model Response Cleaning (LM Studio, Ollama, etc.)
             # ===================================================================
             
+            print(f"🔍 is_local_model = {self.is_local_model}")
+            
             if self.is_local_model:
+                print(f"🏠 ENTERING LOCAL MODEL HANDLING...")
                 # Clean model artifacts and format raw output from local LLMs
                 # Returns (cleaned_response, parsed_tool_calls)
                 response, parsed_tool_calls = LocalModelCleaner.process_response(
@@ -1417,9 +1441,11 @@ When user asks about:
                     endpoint=self.llm_endpoint,
                     user_language=self.user_language
                 )
+                print(f"   process_response returned: parsed_tool_calls={parsed_tool_calls}")
                 
                 # FALLBACK: If no JSON tool calls were parsed, detect intent from user message
                 if not parsed_tool_calls:
+                    print(f"   No JSON tool calls, trying intent detection...")
                     # Get original user message
                     user_msg = ""
                     for msg in reversed(messages):
