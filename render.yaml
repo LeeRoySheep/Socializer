@@ -1,0 +1,22 @@
+services:
+  - type: web
+    name: socializer
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.11.0"
+      - key: SECRET_KEY
+        generateValue: true
+      - key: ALGORITHM
+        value: HS256
+      - key: ACCESS_TOKEN_EXPIRE_MINUTES
+        value: "30"
+      - key: DATABASE_URL
+        value: sqlite:///./data/socializer.db
+      # Add your API keys in Render Dashboard > Environment
+      # - key: OPENAI_API_KEY
+      # - key: GOOGLE_API_KEY
+      # - key: ANTHROPIC_API_KEY
+      # - key: TAVILY_API_KEY

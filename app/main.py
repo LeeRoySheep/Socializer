@@ -192,8 +192,12 @@ def authenticate_user(db: Session, username: str, password: str) -> Optional[Use
 # Import database utilities
 from .db import get_db
 
-# Import test runner router
-from .routers import test_runner
+# Import test runner router (optional - only for development)
+try:
+    from .routers import test_runner
+    HAS_TEST_RUNNER = True
+except ImportError:
+    HAS_TEST_RUNNER = False
 
 # Initialize AI manager
 from .ai_manager import AIAgentManager
@@ -243,8 +247,9 @@ app.add_middleware(
 # Include WebSocket routes
 app.include_router(websocket_router, prefix="/ws")
 
-# Include test runner router
-app.include_router(test_runner.router, prefix="/tests", tags=["Testing"])
+# Include test runner router (only if available)
+if HAS_TEST_RUNNER:
+    app.include_router(test_runner.router, prefix="/tests", tags=["Testing"])
 
 # Include chat router for /docs (WebSocket + REST API)
 from app.routers import chat
