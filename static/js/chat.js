@@ -15,6 +15,9 @@ import { authService } from './auth/AuthService.js';
 // Import PrivateRoomsManager for private chat rooms
 import { privateRoomsManager } from './chat/PrivateRooms.js';
 
+// Import LocalLLM for direct browser-to-LM Studio connection
+import { localLLM } from './modules/LocalLLM.js';
+
 console.log('[CHAT] chat.js loaded');
 
 // ============================================
@@ -722,29 +725,67 @@ async function handleAICommand(message) {
         const selectedModel = window.getCurrentLLMModel ? window.getCurrentLLMModel() : 'gpt-4o-mini';
         console.log('[AI] Using model:', selectedModel);
         
-        const response = await fetch('/api/ai/chat', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${AUTH_TOKEN}`
-            },
-            body: JSON.stringify({
-                message: aiPrompt,
-                conversation_id: `chat-${currentUser.id}`,
-                model: selectedModel
-            })
-        });
+        // Check if local LLM is enabled and should be used
+        const useLocalLLM = localLLM.settings.enabled && 
+            (selectedModel.includes('local') || selectedModel.includes('lm-studio') || selectedModel.includes('ollama'));
+        
+        let responseText = '';
+        let toolsUsed = [];
+        
+        if (useLocalLLM) {
+            // Try local LLM first
+            console.log('[AI] 🏠 Attempting local LLM connection...');
+            try {
+                const available = await localLLM.checkAvailability();
+                if (available) {
+                    console.log('[AI] ✅ Local LLM available, sending request...');
+                    const messages = [
+                        { role: 'system', content: 'You are a helpful AI assistant for Socializer, a social skills training app. Be friendly and supportive.' },
+                        { role: 'user', content: aiPrompt }
+                    ];
+                    const result = await localLLM.chat(messages);
+                    responseText = result.content;
+                    toolsUsed = ['local_llm'];
+                    console.log('[AI] ✅ Local LLM response received');
+                } else {
+                    throw new Error('Local LLM not available');
+                }
+            } catch (localError) {
+                console.warn('[AI] ⚠️ Local LLM failed, falling back to cloud:', localError.message);
+                // Fall through to cloud API
+            }
+        }
+        
+        // Use cloud API if local didn't work or wasn't enabled
+        if (!responseText) {
+            console.log('[AI] ☁️ Using cloud API...');
+            const response = await fetch('/api/ai/chat', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${AUTH_TOKEN}`
+                },
+                body: JSON.stringify({
+                    message: aiPrompt,
+                    conversation_id: `chat-${currentUser.id}`,
+                    model: selectedModel
+                })
+            });
+            
+            if (response.ok) {
+                const data = await response.json();
+                console.log('[AI] Response data:', data);
+                responseText = data.response;
+                toolsUsed = data.tools_used || [];
+            } else {
+                const errorData = await response.json();
+                throw new Error(errorData.detail || 'Unknown error');
+            }
+        }
         
         hideAITypingIndicator();
+        displayAIMessage(responseText, toolsUsed);
         
-        if (response.ok) {
-            const data = await response.json();
-            console.log('[AI] Response data:', data);
-            displayAIMessage(data.response, data.tools_used, data.metrics);
-        } else {
-            const errorData = await response.json();
-            displaySystemMessage(`❌ AI Error: ${errorData.detail || 'Unknown error'}`, 'error-message');
-        }
     } catch (error) {
         hideAITypingIndicator();
         console.error('AI Error:', error);
