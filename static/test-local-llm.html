@@ -1,0 +1,412 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Local LLM Connection Test</title>
+    <style>
+        * { box-sizing: border-box; }
+        body { 
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            max-width: 900px; 
+            margin: 0 auto; 
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+        }
+        .card {
+            background: white;
+            border-radius: 12px;
+            padding: 24px;
+            margin-bottom: 20px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.15);
+        }
+        h1 { color: #333; margin-top: 0; }
+        h2 { color: #555; margin-top: 0; }
+        .status { 
+            padding: 12px 20px; 
+            border-radius: 8px; 
+            margin: 10px 0; 
+            font-weight: 500;
+        }
+        .status.success { background: #d4edda; color: #155724; border-left: 4px solid #28a745; }
+        .status.error { background: #f8d7da; color: #721c24; border-left: 4px solid #dc3545; }
+        .status.info { background: #cce5ff; color: #004085; border-left: 4px solid #007bff; }
+        .status.pending { background: #fff3cd; color: #856404; border-left: 4px solid #ffc107; }
+        button { 
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white; 
+            border: none; 
+            padding: 12px 24px; 
+            border-radius: 8px; 
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: 500;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+        button:hover { 
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+        }
+        button:disabled { 
+            opacity: 0.6; 
+            cursor: not-allowed;
+            transform: none;
+        }
+        .test-group { margin: 20px 0; }
+        .test-group h3 { color: #333; margin-bottom: 10px; }
+        pre { 
+            background: #1e1e1e; 
+            color: #d4d4d4;
+            padding: 16px; 
+            border-radius: 8px; 
+            overflow-x: auto;
+            font-size: 13px;
+            line-height: 1.5;
+        }
+        .code { font-family: 'Monaco', 'Menlo', monospace; }
+        input, select {
+            padding: 10px 14px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            font-size: 14px;
+            width: 100%;
+            margin-bottom: 10px;
+        }
+        input:focus, select:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+        .input-group { margin-bottom: 15px; }
+        .input-group label { 
+            display: block; 
+            margin-bottom: 5px; 
+            font-weight: 500;
+            color: #555;
+        }
+        .row { display: flex; gap: 15px; }
+        .row > * { flex: 1; }
+        .chat-area {
+            background: #f8f9fa;
+            border-radius: 8px;
+            padding: 16px;
+            min-height: 200px;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        .message {
+            padding: 10px 14px;
+            border-radius: 8px;
+            margin-bottom: 8px;
+        }
+        .message.user { background: #667eea; color: white; margin-left: 20%; }
+        .message.assistant { background: white; border: 1px solid #e0e0e0; margin-right: 20%; }
+        .loading { display: inline-block; animation: pulse 1.5s infinite; }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <h1>🧪 Local LLM Connection Test</h1>
+        <p>Test your local LLM (LM Studio / Ollama) connection from the browser.</p>
+    </div>
+
+    <!-- Configuration -->
+    <div class="card">
+        <h2>⚙️ Configuration</h2>
+        <div class="row">
+            <div class="input-group">
+                <label>Provider</label>
+                <select id="provider">
+                    <option value="lmstudio">LM Studio (localhost:1234)</option>
+                    <option value="ollama">Ollama (localhost:11434)</option>
+                    <option value="custom">Custom URL</option>
+                </select>
+            </div>
+            <div class="input-group">
+                <label>Model Name</label>
+                <input type="text" id="model" value="ibm/granite-4-h-tiny" placeholder="local-model">
+            </div>
+        </div>
+        <div class="input-group" id="customUrlGroup" style="display: none;">
+            <label>Custom URL</label>
+            <input type="text" id="customUrl" placeholder="http://localhost:1234/v1">
+        </div>
+    </div>
+
+    <!-- Test 1: Availability Check -->
+    <div class="card">
+        <h2>1️⃣ Availability Check</h2>
+        <p>Tests if the local LLM server is running and accessible.</p>
+        <button onclick="testAvailability()">Test Connection</button>
+        <div id="availabilityResult"></div>
+    </div>
+
+    <!-- Test 2: Models List -->
+    <div class="card">
+        <h2>2️⃣ List Models</h2>
+        <p>Fetches available models from the local LLM.</p>
+        <button onclick="testModels()">Get Models</button>
+        <div id="modelsResult"></div>
+    </div>
+
+    <!-- Test 3: Chat Test -->
+    <div class="card">
+        <h2>3️⃣ Chat Test</h2>
+        <p>Send a test message to verify chat completions work.</p>
+        <div class="input-group">
+            <label>Test Message</label>
+            <input type="text" id="testMessage" value="What day is it today?" placeholder="Enter a test message">
+        </div>
+        <button onclick="testChat()">Send Message</button>
+        <div id="chatResult"></div>
+    </div>
+
+    <!-- Test 4: Full Integration -->
+    <div class="card">
+        <h2>4️⃣ Interactive Chat</h2>
+        <p>Full chat interface to test the local LLM.</p>
+        <div class="chat-area" id="chatArea">
+            <div class="message assistant">👋 Hello! I'm connected to your local LLM. Send a message to test.</div>
+        </div>
+        <div style="margin-top: 15px; display: flex; gap: 10px;">
+            <input type="text" id="userMessage" placeholder="Type your message..." style="flex: 1; margin-bottom: 0;" 
+                   onkeypress="if(event.key==='Enter')sendInteractiveChat()">
+            <button onclick="sendInteractiveChat()">Send</button>
+        </div>
+    </div>
+
+    <!-- Debug Log -->
+    <div class="card">
+        <h2>📋 Debug Log</h2>
+        <pre id="debugLog">Waiting for tests...</pre>
+    </div>
+
+    <script>
+        // Configuration
+        const providers = {
+            lmstudio: 'http://localhost:1234/v1',
+            ollama: 'http://localhost:11434/v1'
+        };
+
+        function getBaseUrl() {
+            const provider = document.getElementById('provider').value;
+            if (provider === 'custom') {
+                return document.getElementById('customUrl').value;
+            }
+            return providers[provider];
+        }
+
+        function getModel() {
+            return document.getElementById('model').value || 'local-model';
+        }
+
+        function log(message, data = null) {
+            const logEl = document.getElementById('debugLog');
+            const timestamp = new Date().toLocaleTimeString();
+            let logMessage = `[${timestamp}] ${message}`;
+            if (data) {
+                logMessage += '\n' + JSON.stringify(data, null, 2);
+            }
+            logEl.textContent = logMessage + '\n\n' + logEl.textContent;
+            console.log(message, data);
+        }
+
+        function showResult(elementId, status, message, data = null) {
+            const el = document.getElementById(elementId);
+            el.innerHTML = `<div class="status ${status}">${message}</div>`;
+            if (data) {
+                el.innerHTML += `<pre>${JSON.stringify(data, null, 2)}</pre>`;
+            }
+        }
+
+        // Show/hide custom URL input
+        document.getElementById('provider').addEventListener('change', (e) => {
+            document.getElementById('customUrlGroup').style.display = 
+                e.target.value === 'custom' ? 'block' : 'none';
+        });
+
+        // Test 1: Availability
+        async function testAvailability() {
+            const baseUrl = getBaseUrl();
+            log(`Testing availability at: ${baseUrl}`);
+            showResult('availabilityResult', 'pending', '⏳ Testing connection...');
+
+            try {
+                const controller = new AbortController();
+                const timeout = setTimeout(() => controller.abort(), 5000);
+
+                const response = await fetch(`${baseUrl}/models`, {
+                    method: 'GET',
+                    headers: { 'Content-Type': 'application/json' },
+                    signal: controller.signal
+                });
+                clearTimeout(timeout);
+
+                if (response.ok) {
+                    const data = await response.json();
+                    log('✅ Connection successful', data);
+                    showResult('availabilityResult', 'success', 
+                        `✅ Connected! Found ${data.data?.length || 0} model(s)`, data);
+                } else {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+            } catch (error) {
+                log('❌ Connection failed', { error: error.message });
+                
+                let hint = '';
+                if (error.message.includes('Failed to fetch') || error.name === 'AbortError') {
+                    hint = '<br><br><strong>Hints:</strong><ul>' +
+                        '<li>Is LM Studio running?</li>' +
+                        '<li>Is the server started in LM Studio? (Server tab → Start Server)</li>' +
+                        '<li>Check if CORS is enabled in LM Studio settings</li>' +
+                        '</ul>';
+                }
+                
+                showResult('availabilityResult', 'error', 
+                    `❌ Connection failed: ${error.message}${hint}`);
+            }
+        }
+
+        // Test 2: Get Models
+        async function testModels() {
+            const baseUrl = getBaseUrl();
+            log(`Fetching models from: ${baseUrl}/models`);
+            showResult('modelsResult', 'pending', '⏳ Fetching models...');
+
+            try {
+                const response = await fetch(`${baseUrl}/models`, {
+                    headers: { 'Content-Type': 'application/json' }
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    log('✅ Models fetched', data);
+                    
+                    const modelList = data.data?.map(m => `• ${m.id}`).join('<br>') || 'No models found';
+                    showResult('modelsResult', 'success', 
+                        `✅ Available models:<br>${modelList}`, data);
+                } else {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+            } catch (error) {
+                log('❌ Failed to fetch models', { error: error.message });
+                showResult('modelsResult', 'error', `❌ Error: ${error.message}`);
+            }
+        }
+
+        // Test 3: Chat
+        async function testChat() {
+            const baseUrl = getBaseUrl();
+            const model = getModel();
+            const testMessage = document.getElementById('testMessage').value;
+            
+            log(`Sending chat to: ${baseUrl}/chat/completions`);
+            showResult('chatResult', 'pending', '⏳ Sending message...');
+
+            const payload = {
+                model: model,
+                messages: [
+                    { role: "system", content: "Always answer in rhymes. Today is Thursday" },
+                    { role: "user", content: testMessage }
+                ],
+                temperature: 0.7,
+                max_tokens: 500,
+                stream: false
+            };
+
+            log('Request payload', payload);
+
+            try {
+                const response = await fetch(`${baseUrl}/chat/completions`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    log('✅ Chat response received', data);
+                    
+                    const content = data.choices?.[0]?.message?.content || 'No response content';
+                    showResult('chatResult', 'success', 
+                        `✅ Response from ${data.model}:<br><br><em>"${content}"</em>`, data);
+                } else {
+                    const errorText = await response.text();
+                    throw new Error(`HTTP ${response.status}: ${errorText}`);
+                }
+            } catch (error) {
+                log('❌ Chat failed', { error: error.message });
+                showResult('chatResult', 'error', `❌ Error: ${error.message}`);
+            }
+        }
+
+        // Test 4: Interactive Chat
+        const chatHistory = [
+            { role: "system", content: "You are a helpful AI assistant for Socializer, a social skills training app. Be friendly and supportive." }
+        ];
+
+        async function sendInteractiveChat() {
+            const input = document.getElementById('userMessage');
+            const message = input.value.trim();
+            if (!message) return;
+
+            input.value = '';
+            const chatArea = document.getElementById('chatArea');
+            
+            // Add user message
+            chatArea.innerHTML += `<div class="message user">${escapeHtml(message)}</div>`;
+            chatHistory.push({ role: "user", content: message });
+            
+            // Show loading
+            const loadingId = 'loading-' + Date.now();
+            chatArea.innerHTML += `<div class="message assistant" id="${loadingId}"><span class="loading">⏳ Thinking...</span></div>`;
+            chatArea.scrollTop = chatArea.scrollHeight;
+
+            try {
+                const baseUrl = getBaseUrl();
+                const model = getModel();
+
+                const response = await fetch(`${baseUrl}/chat/completions`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        model: model,
+                        messages: chatHistory,
+                        temperature: 0.7,
+                        max_tokens: 1000,
+                        stream: false
+                    })
+                });
+
+                const loadingEl = document.getElementById(loadingId);
+
+                if (response.ok) {
+                    const data = await response.json();
+                    const content = data.choices?.[0]?.message?.content || 'No response';
+                    chatHistory.push({ role: "assistant", content: content });
+                    loadingEl.innerHTML = escapeHtml(content);
+                    log('✅ Interactive chat response', { message, response: content });
+                } else {
+                    loadingEl.innerHTML = `❌ Error: ${response.status}`;
+                }
+            } catch (error) {
+                document.getElementById(loadingId).innerHTML = `❌ ${error.message}`;
+                log('❌ Interactive chat error', { error: error.message });
+            }
+
+            chatArea.scrollTop = chatArea.scrollHeight;
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        // Auto-run availability test on load
+        log('🚀 Test page loaded');
+        log('Provider URLs', providers);
+    </script>
+</body>
+</html>

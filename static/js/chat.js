@@ -725,9 +725,9 @@ async function handleAICommand(message) {
         const selectedModel = window.getCurrentLLMModel ? window.getCurrentLLMModel() : 'gpt-4o-mini';
         console.log('[AI] Using model:', selectedModel);
         
-        // Check if local LLM is enabled and should be used
-        const useLocalLLM = localLLM.settings.enabled && 
-            (selectedModel.includes('local') || selectedModel.includes('lm-studio') || selectedModel.includes('ollama'));
+        // Check if local LLM is enabled - use it if enabled, regardless of model name in dropdown
+        // The localLLM.settings.model will contain the actual local model name (e.g., "ibm/granite-4-h-tiny")
+        const useLocalLLM = localLLM.settings.enabled;
         
         let responseText = '';
         let toolsUsed = [];
@@ -735,15 +735,19 @@ async function handleAICommand(message) {
         if (useLocalLLM) {
             // Try local LLM first
             console.log('[AI] 🏠 Attempting local LLM connection...');
+            console.log('[AI] 🏠 Local LLM settings:', localLLM.settings);
             try {
                 const available = await localLLM.checkAvailability();
                 if (available) {
                     console.log('[AI] ✅ Local LLM available, sending request...');
+                    // Use the model from local LLM settings, not the dropdown
+                    const localModel = localLLM.settings.model || 'local-model';
+                    console.log('[AI] 🏠 Using local model:', localModel);
                     const messages = [
                         { role: 'system', content: 'You are a helpful AI assistant for Socializer, a social skills training app. Be friendly and supportive.' },
                         { role: 'user', content: aiPrompt }
                     ];
-                    const result = await localLLM.chat(messages);
+                    const result = await localLLM.chat(messages, { model: localModel });
                     responseText = result.content;
                     toolsUsed = ['local_llm'];
                     console.log('[AI] ✅ Local LLM response received');
