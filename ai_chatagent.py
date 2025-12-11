@@ -1453,13 +1453,18 @@ When user asks about:
                             user_msg = msg.content
                             break
                     
+                    print(f"   User message for intent detection: '{user_msg[:100]}...'")
+                    
                     if user_msg:
                         detected_tool = LocalModelCleaner.detect_tool_intent(user_msg)
+                        print(f"   detect_tool_intent returned: {detected_tool}")
                         if detected_tool:
                             print(f"🔍 FALLBACK: Detected tool intent from user message")
                             print(f"   Tool: {detected_tool['name']}")
                             print(f"   Args: {detected_tool['arguments']}")
                             parsed_tool_calls = [detected_tool]
+                        else:
+                            print(f"   ⚠️  No tool intent detected from message")
                 
                 # If JSON tool calls were parsed from content, execute them with validation
                 if parsed_tool_calls:
