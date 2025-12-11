@@ -23,7 +23,15 @@ db_dir.mkdir(exist_ok=True)
 
 # Use a consistent database path
 DATABASE_PATH = db_dir / "socializer.db"
-SQLALCHEMY_DATABASE_URL = os.getenv("DATABASE_URL", f"sqlite:///{DATABASE_PATH}")
+
+# Get database URL from environment or use SQLite default
+_db_url = os.getenv("DATABASE_URL", f"sqlite:///{DATABASE_PATH}")
+
+# Fix for Render.com: they use postgres:// but SQLAlchemy needs postgresql://
+if _db_url.startswith("postgres://"):
+    _db_url = _db_url.replace("postgres://", "postgresql://", 1)
+
+SQLALCHEMY_DATABASE_URL = _db_url
 
 # Application settings
 DEBUG = os.getenv("DEBUG", "False").lower() in ("true", "1", "t")
