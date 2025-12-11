@@ -275,6 +275,10 @@ app.include_router(ai.router, tags=["AI/LLM"])
 from app.routers import local_llm
 app.include_router(local_llm.router, tags=["Local LLM"])
 
+# Include Tools router for browser-side agent tool execution
+from app.routers import tools
+app.include_router(tools.router, tags=["Tools"])
+
 # Note: Auth endpoints are defined directly in main.py at /api/auth/
 # (lines ~1345, ~1505) to support both JSON API and HTML form submissions
 

@@ -18,6 +18,9 @@ import { privateRoomsManager } from './chat/PrivateRooms.js';
 // Import LocalLLM for direct browser-to-LM Studio connection
 import { localLLM } from './modules/LocalLLM.js';
 
+// Import BrowserAgent for client-side tool execution with local LLM
+import { browserAgent } from './modules/BrowserAgent.js';
+
 console.log('[CHAT] chat.js loaded');
 
 // ============================================
@@ -768,25 +771,22 @@ async function handleAICommand(message) {
                 throw new Error(errorData.detail || 'Unknown error');
             }
         } catch (backendError) {
-            // If local LLM enabled and backend failed, try direct browser connection
+            // If local LLM enabled and backend failed, use BrowserAgent with tools
             if (useLocalLLM && (backendError.message === 'FALLBACK_TO_DIRECT' || backendError.message.includes('fetch'))) {
-                console.log('[AI] 🏠 Attempting direct browser → LM Studio connection...');
+                console.log('[AI] 🏠 Attempting BrowserAgent (direct LLM + backend tools)...');
                 try {
                     const available = await localLLM.checkAvailability();
                     if (available) {
-                        const messages = [
-                            { role: 'system', content: 'You are a helpful AI assistant for Socializer, a social skills training app. Be friendly and supportive.' },
-                            { role: 'user', content: aiPrompt }
-                        ];
-                        const result = await localLLM.chat(messages, { model: modelToUse });
+                        // Use BrowserAgent for full tool support
+                        const result = await browserAgent.chat(aiPrompt);
                         responseText = result.content;
-                        toolsUsed = ['local_llm_direct'];
-                        console.log('[AI] ✅ Direct LLM response received (no tools)');
+                        toolsUsed = result.tools_used || ['browser_agent'];
+                        console.log('[AI] ✅ BrowserAgent response received, tools:', toolsUsed);
                     } else {
                         throw new Error('Local LLM not available');
                     }
                 } catch (directError) {
-                    console.error('[AI] ❌ Direct connection also failed:', directError.message);
+                    console.error('[AI] ❌ BrowserAgent failed:', directError.message);
                     throw directError;
                 }
             } else {
