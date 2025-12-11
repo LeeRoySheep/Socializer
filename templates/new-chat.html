@@ -1089,6 +1089,12 @@
                     <i class="bi bi-cpu model-icon"></i>
                 </div>
                 
+                <!-- Local LLM Settings Button -->
+                <button id="llm-settings-btn" class="llm-settings-btn" title="Local LLM Settings" onclick="window.llmSettings?.show()">
+                    <i class="bi bi-gear"></i>
+                    <span class="llm-status-badge" id="llm-status-badge"></span>
+                </button>
+                
                 <button id="private-chat-btn" class="private-chat-btn">
                     <i class="bi bi-plus-lg"></i>
                     Private Chat
@@ -1601,7 +1607,53 @@
                 opacity: 0;
             }
         }
+        
+        /* Local LLM Settings Button */
+        .llm-settings-btn {
+            position: relative;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border: none;
+            color: white;
+            padding: 0.5rem 0.75rem;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+        .llm-settings-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+        }
+        .llm-status-badge {
+            position: absolute;
+            top: -4px;
+            right: -4px;
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: #f44336;
+            border: 2px solid white;
+        }
+        .llm-status-badge.connected {
+            background: #4caf50;
+        }
     </style>
+    
+    <!-- Local LLM Settings Module -->
+    <script type="module">
+        import { llmSettings } from '/static/js/modules/LLMSettings.js';
+        import { localLLM } from '/static/js/modules/LocalLLM.js';
+        
+        // Check local LLM availability on page load
+        document.addEventListener('DOMContentLoaded', async () => {
+            const badge = document.getElementById('llm-status-badge');
+            if (localLLM.settings.enabled) {
+                const available = await localLLM.checkAvailability();
+                if (available && badge) {
+                    badge.classList.add('connected');
+                }
+            }
+        });
+    </script>
     
     <script src="/static/js/chat.js" type="module"></script>
 </body>
