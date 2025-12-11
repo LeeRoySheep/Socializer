@@ -1209,10 +1209,12 @@ When user asks about:
             
             # ✅ Add local model instructions if using local LLM
             if self.is_local_model:
-                system_prompt += LocalModelCleaner.get_local_model_system_prompt(
+                mcp_prompt = LocalModelCleaner.get_local_model_system_prompt(
                     user_language=self.user_language,
                     available_tools=self.tools  # Pass actual available tools
                 )
+                system_prompt += mcp_prompt
+                print(f"🔧 Added MCP system prompt ({len(mcp_prompt)} chars) for local model")
             
             sys_msg = SystemMessage(content=system_prompt)
             

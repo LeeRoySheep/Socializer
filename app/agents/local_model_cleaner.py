@@ -596,15 +596,35 @@ Information request (use web_search):
             r'\bprevious (conversation|chat|discussion)\b',
             r'\bwhat we talked about\b',
             r'\brecuerdas\b',  # Spanish "remember"
+            r'\b(earlier|before|yesterday)\b.*\b(said|told|mentioned)\b',
+            r'\bdo you (remember|recall)\b',
+            r'\bconversation history\b',
+            r'\bmemory\b',
         ],
         'clarify_communication': [
             r'\b(translate|translation|traducir)\b',
             r'\b(clarify|unclear|rephrase)\b',
             r'\bhow (do|should) I say\b',
+            r'\bwhat does.*mean\b',
         ],
         'user_preference': [
             r'\bmy (preference|setting|config)\b',
             r'\b(change|update|set) my\b',
+            r'\bsettings\b',
+        ],
+        'skill_evaluator': [
+            r'\b(evaluate|assess|rate|score) my (skill|communication|social)\b',
+            r'\bhow am i doing\b',
+            r'\bmy progress\b',
+            r'\btraining\b',
+            r'\bskill (level|evaluation|assessment)\b',
+            r'\b(improve|practice|learn) (social|communication)\b',
+        ],
+        'life_event': [
+            r'\b(important|significant) (event|happening|thing)\b',
+            r'\blife event\b',
+            r'\b(birthday|wedding|graduation|anniversary|promotion)\b',
+            r'\bjust (got|had|received)\b',
         ],
     }
     
@@ -637,12 +657,17 @@ Information request (use web_search):
                         # Build arguments based on tool type
                         args = {}
                         if tool_name == 'web_search':
-                            # Extract search query from message
                             args['query'] = user_message
                         elif tool_name == 'clarify_communication':
                             args['text'] = user_message
                         elif tool_name == 'recall_last_conversation':
                             args = {}  # user_id will be added by caller
+                        elif tool_name == 'skill_evaluator':
+                            args = {'skill_type': 'general'}  # user_id will be added by caller
+                        elif tool_name == 'life_event':
+                            args = {'event_type': 'general', 'description': user_message}
+                        elif tool_name == 'user_preference':
+                            args = {'preference_type': 'general'}
                         
                         return {
                             'name': tool_name,
