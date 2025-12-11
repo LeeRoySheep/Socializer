@@ -222,7 +222,15 @@ app.add_middleware(
         "http://127.0.0.1:63342",
         "http://localhost:8000",
         "http://127.0.0.1:8000",
-        "http://127.0.0.1:5500"  # For live server testing
+        "http://127.0.0.1:5500",  # For live server testing
+        # Local LLM providers
+        "http://localhost:1234",      # LM Studio
+        "http://127.0.0.1:1234",
+        "http://localhost:11434",     # Ollama
+        "http://127.0.0.1:11434",
+        # Production (Render.com)
+        "https://socializer.onrender.com",
+        "https://*.onrender.com",
     ],
     allow_credentials=True,
     allow_methods=["*"],  # Allow all methods
