@@ -22,5 +22,7 @@ openai
 langchain-openai
 langchain-community
 langchain-tavily
+langchain-google-genai
+langchain-anthropic
 email-validator
 pillow
