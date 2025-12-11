@@ -318,27 +318,30 @@ export class LLMSettings {
     }
 
     /**
-     * Test connection to local LLM via backend ping
+     * Test connection to local LLM (tries direct first, then backend)
      */
     async testConnection() {
-        this.updateStatus('Testing via backend...', 'testing');
+        this.updateStatus('Testing connection...', 'testing');
         
         // Temporarily enable for test
         const provider = document.getElementById('llm-provider').value;
+        const customUrl = document.getElementById('llm-custom-url')?.value || '';
         const model = document.getElementById('llm-model').value;
         
         localLLM.saveSettings({
             enabled: true,
             provider,
+            customUrl: provider === 'custom' ? customUrl : '',
             model
         });
 
-        // Use backend ping endpoint
+        // Ping tries direct first, then backend
         const result = await localLLM.ping();
         
         if (result.success) {
+            const modeLabel = result.mode === 'direct' ? '🏠 Direct' : '☁️ Backend';
             this.updateStatus(
-                `✅ Connected! (${result.latency_ms?.toFixed(0)}ms, ${result.models_available} models)`, 
+                `✅ ${modeLabel} (${result.latency_ms?.toFixed(0)}ms, ${result.models_available} models)`, 
                 'online'
             );
             console.log('[LLMSettings] Ping result:', result);
