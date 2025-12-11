@@ -79,10 +79,17 @@ User: "What did we talk about last time?"
      * Get auth headers for backend API calls
      */
     _getAuthHeaders() {
-        const token = window.ACCESS_TOKEN || localStorage.getItem('access_token');
+        // Try multiple sources for the token
+        let token = window.ACCESS_TOKEN || 
+                   window.AUTH_TOKEN || 
+                   localStorage.getItem('access_token') ||
+                   localStorage.getItem('token');
+        
         if (!token) {
+            console.warn('[BrowserAgent] No auth token found');
             return { 'Content-Type': 'application/json' };
         }
+        
         const cleanToken = token.replace(/^Bearer\s+/, '');
         return {
             'Content-Type': 'application/json',
@@ -174,67 +181,82 @@ User: "What did we talk about last time?"
     async chat(userMessage) {
         console.log('[BrowserAgent] 🚀 Starting chat with message:', userMessage);
         
-        const messages = [
-            { role: 'system', content: this.systemPrompt },
-            { role: 'user', content: userMessage }
-        ];
-        
-        let iteration = 0;
-        let toolsUsed = [];
-        
-        while (iteration < this.maxIterations) {
-            iteration++;
-            console.log(`[BrowserAgent] Iteration ${iteration}/${this.maxIterations}`);
+        try {
+            const messages = [
+                { role: 'system', content: this.systemPrompt },
+                { role: 'user', content: userMessage }
+            ];
             
-            // Call LLM
-            const llmResponse = await this._callLLM(messages);
-            console.log('[BrowserAgent] LLM response:', llmResponse);
+            let iteration = 0;
+            let toolsUsed = [];
             
-            // Parse response
-            const parsed = this._parseResponse(llmResponse);
-            
-            if (!parsed) {
-                console.log('[BrowserAgent] Could not parse response, returning raw');
-                return { content: llmResponse, tools_used: toolsUsed };
+            while (iteration < this.maxIterations) {
+                iteration++;
+                console.log(`[BrowserAgent] Iteration ${iteration}/${this.maxIterations}`);
+                
+                try {
+                    // Call LLM
+                    const llmResponse = await this._callLLM(messages);
+                    console.log('[BrowserAgent] LLM response:', llmResponse);
+                    
+                    // Parse response
+                    const parsed = this._parseResponse(llmResponse);
+                    
+                    if (!parsed) {
+                        console.log('[BrowserAgent] Could not parse response, returning raw');
+                        return { content: llmResponse, tools_used: toolsUsed };
+                    }
+                    
+                    // Check if tool call needed
+                    if (parsed.tool_call && parsed.tool_call.name) {
+                        console.log('[BrowserAgent] 🔧 Tool call detected:', parsed.tool_call);
+                        
+                        // Execute tool
+                        const toolResult = await this._executeTool(parsed.tool_call);
+                        toolsUsed.push(parsed.tool_call.name);
+                        
+                        // Add assistant message with tool call
+                        messages.push({
+                            role: 'assistant',
+                            content: llmResponse
+                        });
+                        
+                        // Add tool result as user message
+                        messages.push({
+                            role: 'user',
+                            content: `Tool "${parsed.tool_call.name}" returned: ${toolResult}\n\nPlease provide a natural response based on this result.`
+                        });
+                        
+                        // Continue loop to get final response
+                        continue;
+                    }
+                    
+                    // Direct response - we're done
+                    if (parsed.response) {
+                        console.log('[BrowserAgent] ✅ Final response:', parsed.response);
+                        return { content: parsed.response, tools_used: toolsUsed };
+                    }
+                    
+                    // Fallback
+                    console.log('[BrowserAgent] No response or tool_call, returning raw');
+                    return { content: llmResponse, tools_used: toolsUsed };
+                    
+                } catch (iterError) {
+                    console.error(`[BrowserAgent] Error in iteration ${iteration}:`, iterError);
+                    // Try to continue if possible, or return error on last iteration
+                    if (iteration === this.maxIterations) {
+                        throw iterError;
+                    }
+                }
             }
             
-            // Check if tool call needed
-            if (parsed.tool_call && parsed.tool_call.name) {
-                console.log('[BrowserAgent] 🔧 Tool call detected:', parsed.tool_call);
-                
-                // Execute tool
-                const toolResult = await this._executeTool(parsed.tool_call);
-                toolsUsed.push(parsed.tool_call.name);
-                
-                // Add assistant message with tool call
-                messages.push({
-                    role: 'assistant',
-                    content: llmResponse
-                });
-                
-                // Add tool result as user message
-                messages.push({
-                    role: 'user',
-                    content: `Tool "${parsed.tool_call.name}" returned: ${toolResult}\n\nPlease provide a natural response based on this result.`
-                });
-                
-                // Continue loop to get final response
-                continue;
-            }
+            console.log('[BrowserAgent] Max iterations reached');
+            return { content: 'I had trouble processing your request. Please try again.', tools_used: toolsUsed };
             
-            // Direct response - we're done
-            if (parsed.response) {
-                console.log('[BrowserAgent] ✅ Final response:', parsed.response);
-                return { content: parsed.response, tools_used: toolsUsed };
-            }
-            
-            // Fallback
-            console.log('[BrowserAgent] No response or tool_call, returning raw');
-            return { content: llmResponse, tools_used: toolsUsed };
+        } catch (error) {
+            console.error('[BrowserAgent] Fatal error:', error);
+            throw new Error(`BrowserAgent failed: ${error.message}`);
         }
-        
-        console.log('[BrowserAgent] Max iterations reached');
-        return { content: 'I had trouble processing your request. Please try again.', tools_used: toolsUsed };
     }
 }
 
