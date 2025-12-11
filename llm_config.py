@@ -9,6 +9,9 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+# Detect if running in production (Render.com sets this)
+IS_PRODUCTION = os.getenv("RENDER", "").lower() == "true" or os.getenv("IS_PRODUCTION", "").lower() == "true"
+
 
 class LLMSettings:
     """
@@ -27,7 +30,14 @@ class LLMSettings:
     # ============================================
     
     # Choose your provider
-    DEFAULT_PROVIDER = os.getenv("LLM_PROVIDER", "openai")  # Change to: gemini, claude, lm_studio, ollama
+    _raw_provider = os.getenv("LLM_PROVIDER", "openai")
+    
+    # In production, prevent local providers (they can't connect to localhost)
+    if IS_PRODUCTION and _raw_provider in ("lm_studio", "ollama"):
+        print(f"⚠️  Local provider '{_raw_provider}' not available in production, falling back to 'openai'")
+        _raw_provider = "openai"
+    
+    DEFAULT_PROVIDER = _raw_provider  # Change to: gemini, claude, lm_studio, ollama
     
     # Choose your model (provider-specific)
     DEFAULT_MODEL = os.getenv("LLM_MODEL", "gpt-4o-mini")  # See options below
