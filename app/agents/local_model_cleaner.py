@@ -575,6 +575,73 @@ Information request (use web_search):
         # Fallback if LLM generation fails
         return "I couldn't process your request. Please try again."
     
+    # Patterns to detect tool intent from user messages
+    TOOL_INTENT_PATTERNS = {
+        'web_search': [
+            r'\b(weather|forecast|temperature)\b.*\b(in|at|for)\b',
+            r'\bwhat.*(weather|temperature|forecast)\b',
+            r'\b(search|look up|find|google)\b',
+            r'\b(news|latest|current events)\b',
+            r'\bwho is\b',
+            r'\bwhat is\b.*\b(happening|going on)\b',
+        ],
+        'recall_last_conversation': [
+            r'\b(remember|recall|what did|last time)\b',
+            r'\bprevious (conversation|chat|discussion)\b',
+            r'\bwhat we talked about\b',
+        ],
+        'clarify_communication': [
+            r'\b(translate|translation)\b',
+            r'\b(clarify|unclear|rephrase)\b',
+            r'\bhow (do|should) I say\b',
+        ],
+        'user_preference': [
+            r'\bmy (preference|setting|config)\b',
+            r'\b(change|update|set) my\b',
+        ],
+    }
+    
+    @classmethod
+    def detect_tool_intent(cls, user_message: str) -> Optional[Dict]:
+        """
+        Detect if a user message should trigger a tool call.
+        
+        This is a fallback for when local models don't output proper JSON tool calls.
+        
+        Args:
+            user_message: The user's original message
+            
+        Returns:
+            Optional[Dict]: Tool call dict with 'name' and 'arguments', or None
+        """
+        if not user_message:
+            return None
+        
+        msg_lower = user_message.lower()
+        
+        for tool_name, patterns in cls.TOOL_INTENT_PATTERNS.items():
+            for pattern in patterns:
+                if re.search(pattern, msg_lower, re.IGNORECASE):
+                    logger.info(f"🔍 Detected tool intent: {tool_name} (pattern: {pattern})")
+                    
+                    # Build arguments based on tool type
+                    args = {}
+                    if tool_name == 'web_search':
+                        # Extract search query from message
+                        args['query'] = user_message
+                    elif tool_name == 'clarify_communication':
+                        args['text'] = user_message
+                    elif tool_name == 'recall_last_conversation':
+                        args = {}  # user_id will be added by caller
+                    
+                    return {
+                        'name': tool_name,
+                        'arguments': args,
+                        'detected_by': 'intent_pattern'
+                    }
+        
+        return None
+    
     @classmethod
     def clean_response(cls, content: str) -> str:
         """

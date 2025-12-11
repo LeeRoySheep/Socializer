@@ -1418,6 +1418,23 @@ When user asks about:
                     user_language=self.user_language
                 )
                 
+                # FALLBACK: If no JSON tool calls were parsed, detect intent from user message
+                if not parsed_tool_calls:
+                    # Get original user message
+                    user_msg = ""
+                    for msg in reversed(messages):
+                        if isinstance(msg, HumanMessage):
+                            user_msg = msg.content
+                            break
+                    
+                    if user_msg:
+                        detected_tool = LocalModelCleaner.detect_tool_intent(user_msg)
+                        if detected_tool:
+                            print(f"🔍 FALLBACK: Detected tool intent from user message")
+                            print(f"   Tool: {detected_tool['name']}")
+                            print(f"   Args: {detected_tool['arguments']}")
+                            parsed_tool_calls = [detected_tool]
+                
                 # If JSON tool calls were parsed from content, execute them with validation
                 if parsed_tool_calls:
                     print(f"\n{'='*50}")
