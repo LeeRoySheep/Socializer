@@ -13,24 +13,24 @@ def get_password_hash(password: str) -> str:
     """Generate a password hash.
     
     Args:
-        password: The plain text password
+        password: The plain text password (truncated to 72 bytes for bcrypt)
         
     Returns:
         str: The hashed password
     """
-    return pwd_context.hash(password)
+    return pwd_context.hash(password[:72])
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     """Verify a password against a hash.
     
     Args:
-        plain_password: The plain text password
+        plain_password: The plain text password (truncated to 72 bytes for bcrypt)
         hashed_password: The hashed password to verify against
         
     Returns:
         bool: True if the password matches, False otherwise
     """
-    return pwd_context.verify(plain_password, hashed_password)
+    return pwd_context.verify(plain_password[:72], hashed_password)
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
     """Create a JWT access token.

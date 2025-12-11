@@ -67,12 +67,12 @@ manager = ConnectionManager()
 
 # Password utilities
 def verify_password(plain_password: str, hashed_password: str) -> bool:
-    """Verify a password against a hash."""
-    return pwd_context.verify(plain_password, hashed_password)
+    """Verify a password against a hash (truncated to 72 bytes for bcrypt)."""
+    return pwd_context.verify(plain_password[:72], hashed_password)
 
 def get_password_hash(password: str) -> str:
-    """Generate a password hash."""
-    return pwd_context.hash(password)
+    """Generate a password hash (truncated to 72 bytes for bcrypt)."""
+    return pwd_context.hash(password[:72])
 
 # JWT utilities
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
