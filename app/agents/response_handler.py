@@ -213,6 +213,10 @@ class ResponseHandler:
         if tool_name == 'user_preference':
             return self._format_user_preference(result)
         
+        # Clarify communication tool - EMPATHY COACHING
+        if tool_name == 'clarify_communication':
+            return self._format_clarify_communication(result)
+        
         # Generic data field handling
         if 'data' in result:
             return self._format_data(result['data'], tool_name)
@@ -382,6 +386,33 @@ class ResponseHandler:
                 return f"Retrieved {total} preferences\n{result.get('message', '')}"
         
         return self._format_dict(result, 'user_preference')
+    
+    def _format_clarify_communication(self, result: dict) -> str:
+        """
+        Format clarify_communication results with clear empathy coaching instructions.
+        
+        This format is designed to be clear for local LLMs to understand and act on.
+        """
+        parts = []
+        
+        # Check if empathy issue was detected
+        is_problematic = result.get('EMPATHY_ISSUE_DETECTED', False)
+        original_text = result.get('original_text', '')
+        coaching = result.get('coaching_analysis', '')
+        action = result.get('action_required', 'NONE')
+        
+        if is_problematic:
+            parts.append("⚠️ EMPATHY COACHING REQUIRED!")
+            parts.append(f"\n📝 Original message: \"{original_text}\"")
+            parts.append(f"\n🚨 Action: {action}")
+            parts.append(f"\n📖 Coaching analysis:\n{coaching}")
+            parts.append("\n\n⛔ YOUR TASK: Explain why this message is hurtful and suggest a better way to communicate!")
+        else:
+            parts.append("✅ Message analyzed - no major issues detected")
+            if coaching:
+                parts.append(f"\n📖 Analysis:\n{coaching}")
+        
+        return "\n".join(parts)
     
     def _format_data(self, data: Any, tool_name: str) -> str:
         """

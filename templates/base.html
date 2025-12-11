@@ -4,6 +4,31 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}Socializer{% endblock %}</title>
+    
+    <!-- Favicon for all browsers -->
+    <link rel="icon" type="image/svg+xml" href="{{ url_for('static', path='/favicon.svg') }}">
+    <link rel="alternate icon" type="image/x-icon" href="{{ url_for('static', path='/favicon.ico') }}">
+    
+    <!-- Apple Touch Icon (for iOS) -->
+    <link rel="apple-touch-icon" sizes="180x180" href="{{ url_for('static', path='/apple-touch-icon.png') }}">
+    
+    <!-- Safari Pinned Tab -->
+    <link rel="mask-icon" href="{{ url_for('static', path='/favicon.svg') }}" color="#5bbad5">
+    
+    <!-- Android Chrome -->
+    <link rel="icon" type="image/png" sizes="192x192" href="{{ url_for('static', path='/android-chrome-192x192.png') }}">
+    <link rel="icon" type="image/png" sizes="512x512" href="{{ url_for('static', path='/android-chrome-512x512.png') }}">
+    
+    <!-- Standard favicons -->
+    <link rel="icon" type="image/png" sizes="32x32" href="{{ url_for('static', path='/favicon-32x32.png') }}">
+    <link rel="icon" type="image/png" sizes="16x16" href="{{ url_for('static', path='/favicon-16x16.png') }}">
+    
+    <!-- Web App Manifest -->
+    <link rel="manifest" href="{{ url_for('static', path='/site.webmanifest') }}">
+    
+    <!-- Theme color for mobile browsers -->
+    <meta name="theme-color" content="#ffffff">
+    
     <link rel="stylesheet" href="{{ url_for('static', path='/css/style.css') }}">
     {% block extra_css %}{% endblock %}
 </head>

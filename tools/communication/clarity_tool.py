@@ -78,16 +78,15 @@ class ClarifyCommunicationTool(BaseTool):
     """
     
     name: str = "clarify_communication"
-    description: str = """Use this tool when users don't understand each other or when translation/clarification is needed.
+    description: str = """SOCIAL COACHING TOOL - Use for analyzing communication quality.
     
-    This tool helps with:
-    - Translating foreign language text
-    - Explaining phrases or cultural context
-    - Detecting misunderstandings
-    - Providing clear explanations
-    - Bridging language barriers
+    PRIORITY ORDER:
+    1. EMPATHY CHECK (first!) - Is the message kind, respectful? Could it hurt feelings?
+    2. CLARITY CHECK - Is the message clear and understandable?
+    3. TRANSLATION (last, only if needed) - Translate only if different language
     
-    Input should include the text that needs clarification."""
+    Use for: rude messages, conflicts, miscommunication, unclear wording.
+    NOT primarily a translation tool!"""
     args_schema: Type[BaseModel] = ClarifyCommunicationInput
     llm: Any = None  # Language model instance
     
@@ -200,38 +199,52 @@ class ClarifyCommunicationTool(BaseTool):
         """
         logger.trace("TRANSLATE", f"Translating from {source_language or 'auto'} to {target_language}")
         
-        # Build clarification prompt
-        clarification_prompt = f"""You are a translation and communication clarification assistant in PROACTIVE MODE.
+        # Build clarification prompt - EMPATHY FIRST, TRANSLATION SECOND
+        clarification_prompt = f"""You are a SOCIAL SKILLS COACH analyzing communication.
 
-Text to clarify: "{text}"
-Source language: {source_language or "Auto-detect"}
+Text to analyze: "{text}"
 Target language: {target_language}
 Context: {context or "General conversation"}
 
-IMPORTANT: Be direct and helpful. DO NOT ask if they want help. PROVIDE the help immediately.
+ANALYZE THIS MESSAGE AND RESPOND WITH THIS EXACT FORMAT:
 
-Provide immediately:
-1. Direct translation to {target_language} (if foreign language detected)
-2. Clear explanation of what was meant
-3. Cultural context if relevant
-4. Clarification of any ambiguity
+EMPATHY_STATUS: [PROBLEMATIC or OK]
+REASON: [Why it's problematic or why it's fine]
+COACHING: [Your coaching advice - explain impact and suggest better alternatives]
 
-Format: Start with the translation/clarification directly. Be concise and clear.
-Example: "They said: [translation]. This means [explanation]."
+PRIORITY ORDER:
+1. **EMPATHY CHECK (MOST IMPORTANT)**: Is this message kind? Could it hurt feelings?
+2. **CLARITY CHECK**: Is it clear and understandable?
+3. **TRANSLATION**: Only if text is in different language than {target_language}
 
-DO NOT say "Would you like me to..." or "I can help..." - JUST HELP."""
+If the message contains insults, aggression, or unkind words:
+- Set EMPATHY_STATUS: PROBLEMATIC
+- Explain in COACHING why it's hurtful and how to express it better
+
+Respond in {target_language}."""
 
         # Call LLM
         logger.trace("LLM_CALL", "Invoking LLM for clarification")
         response = self.llm.invoke(clarification_prompt)
         
+        # Build structured result with clear empathy focus
+        analysis = response.content
+        
+        # Detect if message is problematic - LLM explicitly states this
+        is_problematic = "EMPATHY_STATUS: PROBLEMATIC" in analysis or "EMPATHY_STATUS:PROBLEMATIC" in analysis
+        
+        if is_problematic:
+            logger.info(f"⚠️  EMPATHY ISSUE DETECTED - LLM marked as PROBLEMATIC")
+        
         result = {
             "original_text": text,
-            "has_foreign_language": has_foreign_chars,
-            "source_language": source_language or "Auto-detected",
-            "target_language": target_language,
-            "clarification": response.content,
-            "suggested_response": f"Based on '{text}', here's what they meant: {response.content}"
+            "EMPATHY_ISSUE_DETECTED": is_problematic,
+            "coaching_analysis": analysis,
+            "action_required": "TEACH_BETTER_COMMUNICATION" if is_problematic else "NONE",
+            "instruction_for_ai": (
+                f"⚠️ THIS MESSAGE IS PROBLEMATIC! You MUST teach the user why '{text}' is hurtful and suggest a better way to communicate. "
+                f"Analysis: {analysis[:200]}..."
+            ) if is_problematic else f"Message analyzed: {analysis[:200]}..."
         }
         
         logger.observe(

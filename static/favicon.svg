@@ -1,0 +1,43 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!-- Peace Dove - Natural shape, flying right -->
+  <defs>
+    <style>
+      .dove { fill: #ffffff; stroke: #333333; stroke-width: 1.2; stroke-linejoin: round; }
+      .dove-fill { fill: #ffffff; stroke: none; }
+      .wing { fill: #f5f5f5; stroke: #333333; stroke-width: 1; }
+      .eye { fill: #333333; }
+      .beak { fill: #e8a030; stroke: #333333; stroke-width: 0.8; }
+      .branch { fill: none; stroke: #4a7a2a; stroke-width: 1.2; }
+      .leaf { fill: #6b9d4a; }
+    </style>
+  </defs>
+  
+  <!-- Body - simple ellipse -->
+  <ellipse class="dove" cx="30" cy="32" rx="14" ry="8"/>
+  
+  <!-- Head - connected to body -->
+  <ellipse class="dove" cx="48" cy="26" rx="7" ry="6"/>
+  
+  <!-- Neck fill - no stroke to connect smoothly -->
+  <ellipse class="dove-fill" cx="40" cy="30" rx="6" ry="5"/>
+  
+  <!-- Wing - BIGGER, natural position -->
+  <path class="wing" d="M 34 28 C 26 20, 14 14, 6 14 C 12 20, 24 28, 34 34 Z"/>
+  
+  <!-- Tail feathers -->
+  <path class="wing" d="M 16 32 C 10 33, 6 35, 4 38 C 8 36, 12 34, 16 33 Z"/>
+  <path class="wing" d="M 16 34 C 10 36, 6 39, 4 42 C 8 40, 12 37, 16 35 Z"/>
+  
+  <!-- Beak -->
+  <path class="beak" d="M 55 23 L 60 22 L 57 25 Z"/>
+  
+  <!-- Eye -->
+  <circle class="eye" cx="52" cy="23" r="1.5"/>
+  
+  <!-- Olive branch -->
+  <path class="branch" d="M 59 22 Q 61 20, 62 19"/>
+  
+  <!-- Olive leaves -->
+  <ellipse class="leaf" cx="60" cy="20" rx="2.5" ry="1" transform="rotate(-30 60 20)"/>
+  <ellipse class="leaf" cx="61.5" cy="19" rx="2" ry="0.8" transform="rotate(-15 61.5 19)"/>
+</svg>

@@ -15,7 +15,7 @@ from fastapi import FastAPI, Depends, HTTPException, status, Request, Response, 
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, FileResponse
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -280,6 +280,19 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # Mount static files with absolute path
 static_dir = os.path.join(BASE_DIR, 'static')
 app.mount("/static", StaticFiles(directory=static_dir), name="static")
+
+# Favicon routes for browsers that request at root level
+@app.get("/favicon.ico", include_in_schema=False)
+async def favicon():
+    return FileResponse(os.path.join(static_dir, "favicon.ico"))
+
+@app.get("/apple-touch-icon.png", include_in_schema=False)
+async def apple_touch_icon():
+    return FileResponse(os.path.join(static_dir, "apple-touch-icon.png"))
+
+@app.get("/apple-touch-icon-precomposed.png", include_in_schema=False)
+async def apple_touch_icon_precomposed():
+    return FileResponse(os.path.join(static_dir, "apple-touch-icon.png"))
 
 # Initialize general chat history on startup
 @app.on_event("startup")

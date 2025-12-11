@@ -114,6 +114,7 @@ from training import TrainingPlanManager
 
 # Import extracted handlers (modularized)
 from app.agents import ResponseHandler, ToolHandler, MemoryHandler
+from app.agents.local_model_cleaner import LocalModelCleaner
 
 # Initialize the database manager
 db_path = SQLALCHEMY_DATABASE_URL.replace('sqlite:///', ''
@@ -449,6 +450,21 @@ class AiChatagent:
             provider = "openai"  # Default fallback
         
         print(f"🔧 Detected LLM provider: {provider}")
+        
+        # ✅ NEW: Detect if using local model (LM Studio, Ollama)
+        self.llm_endpoint = getattr(llm, 'base_url', getattr(llm, 'api_base', ''))
+        if isinstance(self.llm_endpoint, object) and hasattr(self.llm_endpoint, 'unicode_string'):
+            self.llm_endpoint = str(self.llm_endpoint)  # Convert Pydantic URL to string
+        else:
+            self.llm_endpoint = str(self.llm_endpoint) if self.llm_endpoint else ''
+        
+        self.is_local_model = LocalModelCleaner.is_local_model(
+            model_name=str(llm_model_name),
+            endpoint=self.llm_endpoint
+        )
+        
+        if self.is_local_model:
+            print(f"🏠 Local model detected: {llm_model_name} at {self.llm_endpoint}")
         
         # Initialize ToolManager for this provider
         self.tool_manager = ToolManager(provider=provider, data_manager=dm)
@@ -840,6 +856,57 @@ class AiChatagent:
             
             if is_tool_result:
                 print("\n=== PROCESSING TOOL RESULTS ===")
+                
+                # For local models: Add explicit interpretation guidance
+                if self.is_local_model:
+                    # Find the ToolMessage content
+                    tool_content = ""
+                    original_query = ""
+                    for msg in reversed(messages):
+                        if isinstance(msg, ToolMessage):
+                            tool_content = msg.content
+                        elif isinstance(msg, HumanMessage):
+                            original_query = msg.content
+                            break
+                    
+                    if tool_content:
+                        print(f"🔧 Local model: Enhancing tool result interpretation")
+                        
+                        # Check for empathy issue flags in tool result
+                        empathy_issue = "EMPATHY_ISSUE_DETECTED" in tool_content or "TEACH_BETTER_COMMUNICATION" in tool_content
+                        
+                        if empathy_issue:
+                            print(f"⚠️  EMPATHY ISSUE DETECTED - forcing coaching response")
+                            
+                            # Extract the original problematic text
+                            problem_text = ""
+                            if "original_text" in tool_content:
+                                import re
+                                match = re.search(r"original_text['\"]?\s*[:=]\s*['\"]?([^'\"}\n]+)", tool_content)
+                                if match:
+                                    problem_text = match.group(1).strip()
+                            
+                            interpretation_guide = SystemMessage(content=(
+                                f"⛔ STOP! DO NOT GIVE A GENERIC GREETING!\n\n"
+                                f"The user said something HURTFUL: \"{problem_text or 'see tool results'}\"\n\n"
+                                f"You are a SOCIAL SKILLS COACH. Your response MUST:\n"
+                                f"1. START by acknowledging you noticed the message was harsh\n"
+                                f"2. EXPLAIN specifically why calling people 'stupid' is hurtful\n"
+                                f"3. SUGGEST a better way: 'I'm frustrated' instead of insults\n"
+                                f"4. Be kind - maybe they're having a bad day\n\n"
+                                f"EXAMPLE RESPONSE:\n"
+                                f"\"I noticed your greeting sounded a bit harsh. Calling people 'stupid' can really hurt feelings. "
+                                f"If you're feeling frustrated, try saying 'I'm having a tough day' instead. "
+                                f"How can I help you feel better?\"\n\n"
+                                f"Respond in {self.user_language}. Output ONLY your coaching - NO 'Hello, how can I help?'"
+                            ))
+                        else:
+                            interpretation_guide = SystemMessage(content=(
+                                f"You received tool results. Provide a helpful coaching response in {self.user_language}.\n"
+                                f"Focus on social skills and communication improvement.\n"
+                                f"NO JSON output - just your natural response."
+                            ))
+                        messages = [interpretation_guide] + list(messages)
             else:
                 print("\n=== PROCESSING REGULAR MESSAGE ===")
             
@@ -1119,6 +1186,13 @@ When user asks about:
   3. When they confirm, call `set_language_preference` tool with language="{detected_language_info['language']}"
 - IMPORTANT: The confirmation message is ALREADY in {detected_language_info['language']} - use it as-is!"""
             
+            # ✅ Add local model instructions if using local LLM
+            if self.is_local_model:
+                system_prompt += LocalModelCleaner.get_local_model_system_prompt(
+                    user_language=self.user_language,
+                    available_tools=self.tools  # Pass actual available tools
+                )
+            
             sys_msg = SystemMessage(content=system_prompt)
             
             # Convert messages to the format expected by the LLM
@@ -1126,14 +1200,13 @@ When user asks about:
             
             # Add historical context (last 20 messages from DB)
             # Convert to proper LangChain message objects for Claude compatibility
-            from langchain_core.messages import HumanMessage as HM, AIMessage as AIM
             for hist_msg in historical_messages:
                 if isinstance(hist_msg, dict) and 'content' in hist_msg:
                     role = hist_msg.get('role', 'user')
                     if role == 'user':
-                        messages_for_llm.append(HM(content=hist_msg['content']))
+                        messages_for_llm.append(HumanMessage(content=hist_msg['content']))
                     else:
-                        messages_for_llm.append(AIM(content=hist_msg['content']))
+                        messages_for_llm.append(AIMessage(content=hist_msg['content']))
             
             # Add current state messages
             messages = state.get('messages', []) if isinstance(state, dict) else state.messages
@@ -1148,12 +1221,11 @@ When user asks about:
                     print(f"Added message to LLM context - Type: {type(msg).__name__}, Content: {content_preview}...")
                 elif isinstance(msg, dict) and 'content' in msg:
                     # Handle dictionary messages (convert to appropriate message type)
-                    from langchain_core.messages import HumanMessage as HM, AIMessage as AIM
                     role = msg.get('role', 'user')
                     if role == 'user':
-                        messages_for_llm.append(HM(content=msg['content']))
+                        messages_for_llm.append(HumanMessage(content=msg['content']))
                     else:
-                        messages_for_llm.append(AIM(content=msg['content']))
+                        messages_for_llm.append(AIMessage(content=msg['content']))
                     print(f"Added dict message to LLM context - Role: {role}, Content: {msg['content'][:100]}...")
             
             print("\n=== INVOKING LLM WITH TOOLS ===")
@@ -1228,7 +1300,6 @@ When user asks about:
                         print(f"🛑 Blocking further tavily_search calls to prevent infinite loop")
                         
                         # Force stop the loop
-                        from langchain_core.messages import AIMessage
                         stop_message = AIMessage(
                             content="I've already searched for this information. Based on the search results above, I can answer your question. Please let me know if you need any clarification or have a different question."
                         )
@@ -1332,6 +1403,230 @@ When user asks about:
                     print(f"   Tool: {tool_name}")
                 # Return the AIMessage with tool_calls - graph will route to tools node
                 return {"messages": [response]}
+            
+            # ===================================================================
+            # 🧹 Local Model Response Cleaning (LM Studio, Ollama, etc.)
+            # ===================================================================
+            
+            if self.is_local_model:
+                # Clean model artifacts and format raw output from local LLMs
+                # Returns (cleaned_response, parsed_tool_calls)
+                response, parsed_tool_calls = LocalModelCleaner.process_response(
+                    response=response,
+                    model_name=getattr(self.llm, 'model_name', getattr(self.llm, 'model', '')),
+                    endpoint=self.llm_endpoint,
+                    user_language=self.user_language
+                )
+                
+                # If JSON tool calls were parsed from content, execute them with validation
+                if parsed_tool_calls:
+                    print(f"\n{'='*50}")
+                    print(f"🔧 LOCAL MODEL TOOL EXECUTION DEBUG")
+                    print(f"{'='*50}")
+                    print(f"📥 Parsed {len(parsed_tool_calls)} tool calls:")
+                    for i, tc in enumerate(parsed_tool_calls):
+                        print(f"   [{i+1}] name: {tc.get('name')}")
+                        print(f"       args: {tc.get('arguments', tc.get('args', {}))}")
+                    
+                    tool_results = []
+                    executed_tools = []  # Track for observability
+                    invalid_tools = []  # Track invalid tool names for retry
+                    
+                    # Get available tool names for validation
+                    available_tool_names = set(self.tool_instances.keys())
+                    
+                    for tool_call in parsed_tool_calls:
+                        original_name = tool_call.get('name', '')
+                        tool_args = tool_call.get('arguments', tool_call.get('args', {}))
+                        
+                        # Check if tool exists (with mapping fallback)
+                        mapped_name = LocalModelCleaner.map_tool_name(original_name)
+                        
+                        if mapped_name not in available_tool_names:
+                            print(f"   ⚠️  Invalid tool: {original_name} (mapped: {mapped_name})")
+                            invalid_tools.append(original_name)
+                            continue
+                        
+                        # Map and fix arguments
+                        fixed_args = LocalModelCleaner.map_tool_arguments(
+                            original_name, tool_args, self.user_language
+                        )
+                        
+                        # Track for observability
+                        executed_tools.append({
+                            'original': original_name,
+                            'mapped': mapped_name,
+                            'args': fixed_args
+                        })
+                        
+                        # Execute the tool
+                        try:
+                            tool = self.tool_instances[mapped_name]
+                            print(f"   🔧 Executing {mapped_name} with args: {fixed_args}")
+                            print(f"   📋 Tool type: {type(tool).__name__}")
+                            result = tool._run(**fixed_args) if isinstance(fixed_args, dict) else tool._run(fixed_args)
+                            print(f"   📤 Tool result type: {type(result).__name__}")
+                            print(f"   📤 Tool result: {str(result)[:300]}...")
+                            tool_results.append({
+                                'name': mapped_name,
+                                'original_name': original_name,
+                                'result': result
+                            })
+                            print(f"   ✅ {mapped_name} completed successfully")
+                        except Exception as e:
+                            print(f"   ❌ {mapped_name} failed: {e}")
+                            import traceback
+                            traceback.print_exc()
+                            tool_results.append({
+                                'name': mapped_name,
+                                'original_name': original_name,
+                                'error': str(e)
+                            })
+                    
+                    # If there were invalid tools, retry up to 3 times
+                    retry_count = getattr(self, '_tool_retry_count', 0)
+                    if invalid_tools and retry_count < 3:
+                        self._tool_retry_count = retry_count + 1
+                        print(f"🔄 Retry {self._tool_retry_count}/3: Invalid tools {invalid_tools}")
+                        
+                        # Ask LLM to re-evaluate with correct tool names
+                        retry_prompt = [
+                            SystemMessage(content=(
+                                f"The following tools do NOT exist: {invalid_tools}\n\n"
+                                f"Available tools are ONLY: {list(available_tool_names)}\n\n"
+                                f"Please select the correct tool from the available list. "
+                                f"Respond with the JSON format:\n"
+                                f'{{"formatted_output": null, "tool_calls": [{{"name": "correct_tool", "arguments": {{...}}}}]}}'
+                            )),
+                            HumanMessage(content=f"Original request used invalid tool '{invalid_tools[0]}'. Which available tool should be used instead?")
+                        ]
+                        
+                        try:
+                            retry_response = self.llm.invoke(retry_prompt)
+                            retry_content = retry_response.content if hasattr(retry_response, 'content') else str(retry_response)
+                            
+                            # Parse retry response
+                            retry_tools, retry_text = LocalModelCleaner.parse_json_tool_calls(retry_content)
+                            
+                            if retry_tools:
+                                # Add to parsed_tool_calls and re-process
+                                for rt in retry_tools:
+                                    rt_name = rt.get('name', '')
+                                    if rt_name in available_tool_names:
+                                        rt_args = rt.get('arguments', rt.get('args', {}))
+                                        try:
+                                            tool = self.tool_instances[rt_name]
+                                            result = tool._run(**rt_args) if isinstance(rt_args, dict) else tool._run(rt_args)
+                                            tool_results.append({'name': rt_name, 'result': result})
+                                            executed_tools.append({'original': rt_name, 'mapped': rt_name, 'args': rt_args})
+                                            print(f"   ✅ Retry: {rt_name} completed")
+                                        except Exception as e:
+                                            tool_results.append({'name': rt_name, 'error': str(e)})
+                        except Exception as e:
+                            print(f"   ⚠️  Retry failed: {e}")
+                    
+                    elif invalid_tools and retry_count >= 3:
+                        # Max retries reached - return error
+                        print(f"❌ Tool.Use.Error: Max retries (3) reached for invalid tools: {invalid_tools}")
+                        self._tool_retry_count = 0  # Reset for next request
+                        response = AIMessage(content=f"Tool.Use.Error: Could not find valid tools after 3 attempts. Invalid tools: {invalid_tools}")
+                        result = {"messages": [response]}
+                        self.memory_handler.save_conversation(state, result)
+                        return result
+                    else:
+                        # Reset retry count on success
+                        self._tool_retry_count = 0
+                    
+                    # If ALL tools were invalid and no results, generate direct response
+                    if not tool_results and invalid_tools:
+                        print(f"⚠️  All tools invalid ({invalid_tools}), generating direct response...")
+                        
+                        # Get original user message
+                        user_msg = ""
+                        for msg in reversed(messages):
+                            if isinstance(msg, HumanMessage):
+                                user_msg = msg.content
+                                break
+                        
+                        # Generate direct coaching response - FORCE plain text
+                        direct_prompt = [
+                            SystemMessage(content=(
+                                f"CRITICAL: Output ONLY plain text. NO JSON. NO tool calls. NO brackets.\n\n"
+                                f"You are a Social Skills Coach. The user said: '{user_msg}'\n\n"
+                                f"Reply in {self.user_language} with a warm, friendly greeting.\n"
+                                f"Example: 'Hello! Great to hear from you. How can I help you today?'\n\n"
+                                f"Just write the response text directly - nothing else."
+                            )),
+                            HumanMessage(content=user_msg)
+                        ]
+                        
+                        try:
+                            direct_response = self.llm.invoke(direct_prompt)
+                            content = direct_response.content if hasattr(direct_response, 'content') else str(direct_response)
+                            content = LocalModelCleaner.clean_response(content)
+                            
+                            # Extra check: if still JSON, extract text or use fallback
+                            if content.strip().startswith('[') or content.strip().startswith('{'):
+                                print(f"⚠️  Model still output JSON, using fallback")
+                                # Try to extract formatted_output if present
+                                try:
+                                    # json already imported at top of file
+                                    parsed = json.loads(content)
+                                    if isinstance(parsed, dict) and parsed.get('formatted_output'):
+                                        content = parsed['formatted_output']
+                                    else:
+                                        content = f"Hello! How can I help you with your social skills today?"
+                                except:
+                                    content = f"Hello! How can I help you with your social skills today?"
+                            
+                            response = AIMessage(content=content)
+                            print(f"✅ Generated direct response: {content[:50]}...")
+                        except Exception as e:
+                            print(f"⚠️  Direct response failed: {e}")
+                            response = AIMessage(content=f"Hello! How can I help you today?")
+                    
+                    # If we have tool results, interpret them
+                    elif tool_results:
+                        print("🔄 Interpreting tool results with LLM...")
+                        results_text = "\n".join([
+                            f"- {r['name']}: {str(r.get('result', r.get('error', 'No result')))[:500]}"
+                            for r in tool_results
+                        ])
+                        
+                        interpret_messages = [
+                            SystemMessage(content=(
+                                f"You are a Social Skills Coach. Respond warmly in {self.user_language}. "
+                                f"Based on the tool results, provide a helpful, natural response:"
+                            )),
+                            HumanMessage(content=f"Tool results:\n{results_text}\n\nProvide a natural coaching response.")
+                        ]
+                        
+                        try:
+                            # Use LLM without tools to generate natural response
+                            interpreted = self.llm.invoke(interpret_messages)
+                            
+                            # Append tool calls at bottom for observability
+                            content = interpreted.content if hasattr(interpreted, 'content') else str(interpreted)
+                            content = LocalModelCleaner.clean_response(content)
+                            
+                            # Add observability section
+                            tools_summary = "\n".join([
+                                f"  - {et['mapped']}" + (f" (from {et['original']})" if et['original'] != et['mapped'] else "") + f": {et['args']}"
+                                for et in executed_tools
+                            ])
+                            content += f"\n\n---\n🔧 **Tools used:**\n{tools_summary}"
+                            
+                            response = AIMessage(content=content)
+                            print(f"✅ Generated natural response from tool results")
+                        except Exception as e:
+                            print(f"⚠️  Interpretation failed: {e}")
+                            # Create fallback response using LLM to generate natural error
+                            error_msg = LocalModelCleaner.generate_error_message(
+                                llm=self.llm,
+                                user_language=self.user_language,
+                                error_context=str(e)
+                            )
+                            response = AIMessage(content=error_msg)
             
             # ===================================================================
             # 🚀 Universal Empty Response Handling (works for ALL providers)
