@@ -725,39 +725,73 @@ async function handleAICommand(message) {
         const selectedModel = window.getCurrentLLMModel ? window.getCurrentLLMModel() : 'gpt-4o-mini';
         console.log('[AI] Using model:', selectedModel);
         
-        // Always use backend API for AI chat (tools are handled there)
-        // If local LLM is enabled, pass use_local_llm flag to backend
         const useLocalLLM = localLLM.settings.enabled;
         const modelToUse = useLocalLLM ? (localLLM.settings.model || 'local-model') : selectedModel;
-        
-        console.log('[AI] Sending to backend API...');
-        console.log('[AI] Model:', modelToUse, useLocalLLM ? '(local LLM)' : '(cloud)');
         
         let responseText = '';
         let toolsUsed = [];
         
-        const response = await fetch('/api/ai/chat', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${AUTH_TOKEN}`
-            },
-            body: JSON.stringify({
-                message: aiPrompt,
-                conversation_id: `chat-${currentUser.id}`,
-                model: modelToUse,
-                use_local_llm: useLocalLLM
-            })
-        });
+        // HYBRID APPROACH:
+        // 1. Try backend API first (has tools)
+        // 2. If backend fails to reach local LLM, try direct browser connection
         
-        if (response.ok) {
-            const data = await response.json();
-            console.log('[AI] Response data:', data);
-            responseText = data.response;
-            toolsUsed = data.tools_used || [];
-        } else {
-            const errorData = await response.json();
-            throw new Error(errorData.detail || 'Unknown error');
+        console.log('[AI] Trying backend API first (with tools)...');
+        console.log('[AI] Model:', modelToUse, useLocalLLM ? '(local LLM)' : '(cloud)');
+        
+        try {
+            const response = await fetch('/api/ai/chat', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${AUTH_TOKEN}`
+                },
+                body: JSON.stringify({
+                    message: aiPrompt,
+                    conversation_id: `chat-${currentUser.id}`,
+                    model: modelToUse,
+                    use_local_llm: useLocalLLM
+                })
+            });
+            
+            if (response.ok) {
+                const data = await response.json();
+                console.log('[AI] ✅ Backend response received:', data);
+                responseText = data.response;
+                toolsUsed = data.tools_used || [];
+            } else {
+                const errorData = await response.json();
+                // Check if it's a connection error to local LLM
+                if (useLocalLLM && (errorData.detail?.includes('Connection') || errorData.detail?.includes('localhost'))) {
+                    console.log('[AI] ⚠️ Backend cannot reach local LLM, trying direct connection...');
+                    throw new Error('FALLBACK_TO_DIRECT');
+                }
+                throw new Error(errorData.detail || 'Unknown error');
+            }
+        } catch (backendError) {
+            // If local LLM enabled and backend failed, try direct browser connection
+            if (useLocalLLM && (backendError.message === 'FALLBACK_TO_DIRECT' || backendError.message.includes('fetch'))) {
+                console.log('[AI] 🏠 Attempting direct browser → LM Studio connection...');
+                try {
+                    const available = await localLLM.checkAvailability();
+                    if (available) {
+                        const messages = [
+                            { role: 'system', content: 'You are a helpful AI assistant for Socializer, a social skills training app. Be friendly and supportive.' },
+                            { role: 'user', content: aiPrompt }
+                        ];
+                        const result = await localLLM.chat(messages, { model: modelToUse });
+                        responseText = result.content;
+                        toolsUsed = ['local_llm_direct'];
+                        console.log('[AI] ✅ Direct LLM response received (no tools)');
+                    } else {
+                        throw new Error('Local LLM not available');
+                    }
+                } catch (directError) {
+                    console.error('[AI] ❌ Direct connection also failed:', directError.message);
+                    throw directError;
+                }
+            } else {
+                throw backendError;
+            }
         }
         
         hideAITypingIndicator();
