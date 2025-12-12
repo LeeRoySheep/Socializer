@@ -321,6 +321,16 @@ async def startup_event():
     """Initialize services on startup."""
     from app.websocket.general_chat_history import get_general_chat_history
     from datamanager.data_manager import DataManager
+    from app.database import create_tables
+    
+    # CRITICAL: Create all database tables first
+    logger.info("[STARTUP] 🔨 Creating database tables...")
+    try:
+        create_tables()
+        logger.info("[STARTUP] ✅ Database tables created/verified successfully")
+    except Exception as e:
+        logger.error(f"[STARTUP] ❌ Failed to create tables: {e}")
+        # Don't crash the app, but log the error
     
     logger.info("[STARTUP] Initializing general chat history...")
     
@@ -1687,13 +1697,6 @@ async def test_ai_page():
 async def health_check():
     """Health check endpoint for load balancers and monitoring."""
     return {"status": "ok"}
-
-# Startup event
-@app.on_event("startup")
-async def startup_event():
-    """Initialize services on application startup."""
-    # Any initialization code can go here
-    pass
 
 # For development
 if __name__ == "__main__":
